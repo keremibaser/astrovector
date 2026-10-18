@@ -49,6 +49,9 @@ upload). See `deploy/README.md`.
   time (`4003`), so no single misconfigured environment variable can expose it.
 - `admin-client/` is excluded from the image and from `.dockerignore` on purpose.
 - Secrets are read from `.env` / `.env.production` at runtime and are **never** committed.
+- If `ADMIN_SECRET_KEY` is absent (a PaaS container ships no `.env`), the server **does not crash**:
+  it logs a loud warning and **never opens the admin socket at all** — no port, nothing to
+  authenticate against, which is strictly safer than running with a blank key.
 
 ## Layout
 

@@ -2,6 +2,7 @@
 //   1) PUBLIC_GAME_WS  (port 8081): oyuncular buraya bağlanır. Sadece oyun mesajları.
 //   2) ADMIN_WS        (port 8090): SADECE admin-client (localhost) buraya bağlanır.
 //      ADMIN_SECRET_KEY handshake'i zorunlu; yanlış key => socket DERHAL kapanır + IP blacklist 60sn.
+//      ADMIN_SECRET_KEY tanimli DEGILSE bu yuva HIC ACILMAZ (bkz. M5b notu: sunucu olmez, uyarir).
 // Performans gerekçesi (bkz. MIMARI_VE_GOREVLER.md):
 //   - 'ws' kütüphanesi (saf WebSocket) seçildi, Socket.io DEĞİL. Socket.io'nun polling
 //     fallback katmanı + event-name overhead'i gereksiz CPU/RAM ve ~100-300ms handshake gecikmesi demek.
@@ -34,11 +35,23 @@ const PORT_GAME = Number(process.env.PORT_GAME || process.env.PORT || 8081);
 // cevaplanmalı — eski süreç portu tutarken yeni süreç düşerse (EADDRINUSE) yeni kod HİÇ devreye
 // girmez ve bu kullanıcı için görünmez olur (yaşandı). Konsolda bu damga + istemcideki SURUM
 // eşleşmiyorsa iki taraf farklı sürümdedir.
-const SURUM = '2026-10-18j-M5a';
+const SURUM = '2026-10-18k-M5b';
 const PORT_ADMIN = Number(process.env.PORT_ADMIN || 8090);
-// AI'A NOT: ADMIN_SECRET_KEY .env'de olur ve ASLA repoya girmez. Uzun rastgele string (32+ char).
+// AI'A NOT (M5b — PaaS/ücretsiz barındırma): ADMIN_SECRET_KEY .env'de olur ve ASLA repoya girmez.
+// Bulut platformlarında (Back4App/Render/Cloud Run) `.env` YOKTUR. Eskiden burada `throw` vardı:
+// konteyner açılışta çöküp yeniden başlatma döngüsüne giriyordu (ölçüldü — server.js:41).
+// Artık anahtar yoksa süreç ÖLMEZ: **admin yuvası hiç açılmaz** ve yüksek sesle uyarılır.
+// Bu, güvenlik açısından DAHA SIKIdır (yuvayı hiç açmamak, zayıf/boş bir anahtarla açmaktan iyidir)
+// ve oyunu etkilemez. Yerelde admin gerekiyorsa .env'e ADMIN_SECRET_KEY ekle (.env.example).
 const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY;
-if (!ADMIN_SECRET) throw new Error('ADMIN_SECRET_KEY .env dosyasında tanımlı olmalı!');
+const ADMIN_ENABLED = !!ADMIN_SECRET;
+if (!ADMIN_ENABLED) {
+  console.warn('');
+  console.warn('[UYARI] ADMIN_SECRET_KEY tanimli degil -> ADMIN PANELI DEVRE DISI.');
+  console.warn(`        Oyun normal calisir; admin yuvasi (port ${PORT_ADMIN}) HIC ACILMAZ.`);
+  console.warn('        Yerelde admin icin .env dosyasina ADMIN_SECRET_KEY ekle (.env.example).');
+  console.warn('');
+}
 
 // Geliştirme statik servisi için istemci klasörü + MIME tablosu (bkz. gameHttp).
 const CLIENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'game-client');
@@ -389,8 +402,12 @@ const ADMIN_ALLOW_REMOTE = process.env.ADMIN_ALLOW_REMOTE === '1';
 
 gameHttp.listen(PORT_GAME, GAME_BIND, () =>
   console.log(`Game ws   : ws://${GAME_BIND}:${PORT_GAME}   (SURUM ${SURUM})  [oyuncu trafigi]`));
-adminHttp.listen(PORT_ADMIN, ADMIN_BIND, () =>
-  console.log(`Admin ws  : ws://${ADMIN_BIND}:${PORT_ADMIN} (SADECE YEREL${ADMIN_ALLOW_REMOTE ? ' — uzak erisim ACIK!' : ', uzaktan erisilemez'})`));
+if (ADMIN_ENABLED) {
+  adminHttp.listen(PORT_ADMIN, ADMIN_BIND, () => console.log(`Admin ws  : ws://${ADMIN_BIND}:${PORT_ADMIN} (SADECE YEREL${ADMIN_ALLOW_REMOTE ? ' — uzak erisim ACIK!' : ', uzaktan erisilemez'})`));
+} else {
+  // Anahtar yoksa HİÇBİR port dinlenmez: dışarıya açık bir admin yuvası bulunmaz.
+  console.log('Admin ws  : KAPALI (ADMIN_SECRET_KEY yok) — hicbir port dinlenmiyor');
+}
 
 // AI'A NOT (M3f — İKİNCİ TUR, gerçek hata buydu): ilk denemede `error` dinleyicisini yalnız
 // `gameHttp`/`adminHttp` üzerine koydum ve İŞE YARAMADI: `ws` paketi bir `WebSocketServer`

@@ -737,6 +737,16 @@ istemci `?anom=1` (frekans kutusunu açar), `?keyseq=<rakamlar>` (GERÇEK `keydo
       (compose+Caddy+systemd+`bootstrap.sh`/`upload.sh`).
 - [x] **Git deposu (2026-10-18):** `github.com/keremibaser/astrovector` (public) — 44 dosya,
       `.env` ve `backend/data/` repoda YOK (ölçüldü), istemci HTML'i `PixiJS` istemcisi tek dosya.
+- [x] **`ADMIN_SECRET_KEY` engeli çözüldü (M5b, 2026-10-18 — kullanıcı kararı).** Platformda `.env`
+      olmadığı için `server.js` açılışta `throw` ile ölüyordu → konteyner yeniden başlatma döngüsü.
+      Artık anahtar yoksa **süreç ölmez**: admin yuvası **hiç açılmaz** + yüksek sesli uyarı (yuvayı
+      hiç açmamak, zayıf/boş anahtarla açmaktan daha sıkıdır; oyun etkilenmez). **Ölçüm:**
+      `ADMIN_SECRET_KEY= PORT=18081 PORT_ADMIN=18091` → konsol `Admin ws : KAPALI`, HTTP `/` **200**,
+      port **18091 dinlenmiyor**, `npm run smoke` **BAŞARILI**; anahtarlı sunucuda `8090` hâlâ
+      dinleniyor ve `npm run test-admin` **exit 0** (regresyon yok). SURUM → `2026-10-18k-M5b`.
+- [x] **Gerçek WebSocket smoke aracı:** `npm run smoke` (`backend/scripts/ws-smoke.mjs`) —
+      `WS_URL` verilen sunucuya bağlanır, ilk `sn`'i bekler ve `jumpRange`(sayı)/`recipes`(dizi)/
+      `items`(DOLU NESNE — dizi DEĞİL) alanlarını doğrular. Ölçüm (yerel): bağlantı 7 ms, `sn` 7 ms.
 - [ ] **Bekleyen:** (1) Back4App hesabı + repo bağlama + Dockerfile/port ayarı, (2) o hedefte
       **uçtan uca canlı doğrulama** (WebSocket bağlanıyor mu, `hata=yok`, oyuncu sayısı artıyor mu),
       (3) domain: yoksa `http://` + `ws://` çalışır; domain alınırsa Caddy/named tunnel TLS'i alır ve
