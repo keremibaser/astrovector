@@ -23,10 +23,14 @@ Windows, one click: **`start.bat`** (kills stale listeners, starts the server, o
 
 ```bash
 npm run test-all                # 11 suites in series (each starts its own server)
+WS_URL=wss://host npm run smoke # real WebSocket round-trip against a running (or live) server
 ```
 
 Covers the bitmap-font launcher, i18n key parity, admin God Mode, milestone-4 rooms, anomaly
 gameplay, warp range, combat, fuel, crafting boost, pirates and chat.
+`npm run smoke` is the deployment check: it opens an actual WebSocket, waits for the first `sn`
+snapshot and asserts the server-authoritative fields (`jumpRange`, `recipes`, `items`) really
+arrived — "the image built" is not the same claim as "the game is playable".
 
 ## Deploy
 

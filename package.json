@@ -21,6 +21,7 @@
     "test-bat": "node backend/scripts/test-bat.mjs",
     "test-m4": "node backend/scripts/test-milestone4.mjs",
     "test-anomaly": "node backend/scripts/test-anomaly.mjs",
+    "smoke": "node backend/scripts/ws-smoke.mjs",
     "test-all": "npm run test-bat && npm run test-i18n && npm run test-admin && npm run test-m4 && npm run test-anomaly && npm run test-warp && npm run test-combat && npm run test-fuel && npm run test-craft-boost && npm run test-pirates && npm run test-chat"
   },
   "dependencies": {
