@@ -1,0 +1,42 @@
+# =============================================================================
+# AstroVector — Render Blueprint (render.yaml)
+# =============================================================================
+# AI'A NOT: Render repoyu görünce servisi BU dosyadan kurar (Dashboard → New + → Blueprint).
+# Elle tek tek alan doldurmaya gerek kalmaz; "kadraj" burada tanımlıdır.
+#
+# NEDEN DOCKER: imajı zaten kökteki Dockerfile üretiyor; Render sadece build edip çalıştırır.
+#   · dockerfilePath/dockerContext varsayılanları (./Dockerfile, repo kökü) bizim yapıyla aynı,
+#     yine de açıkça yazıldı ki ileride biri kök dosyayı taşırsa servis sessizce bozulmasın.
+#   · Render `PORT` env'i VERİR (varsayılan 10000) ve trafiği o porta yönlendirir → imajda sabit
+#     PORT_GAME YOKTUR, sunucu `PORT_GAME || PORT || 8081` izler (bkz. Tuzak 62). Boş DUR.
+#   · `ADMIN_SECRET_KEY` bilerek tanımlanmadı: anahtar yoksa sunucu admin yuvasını HİÇ AÇMAZ
+#     (bkz. Tuzak 67 / server.js M5b notu) → platformda hiç sır taşımıyoruz, admin dışarı kapalı.
+#
+# NEDEN FRANKFURT: Türkiye'ye en yakın Render bölgesi (en düşük gecikme).
+# NEDEN free: kullanıcı kararı (kart yok). BEDELİ: boşta 15 dk trafik almazsa uyur; ilk gelen
+#   oyuncu ~1 dk soğuk başlangıç bekler (tarayıcıda Render'ın yükleme ekranı görünür). İstemcide
+#   otomatik yeniden bağlanma var (game-client/index.html → `ws.onclose` + 25 sn heartbeat), yani
+#   uyku→uyanma oyunu kırmaz, sadece ilk açılışı geciktirir.
+#   UYARI: 750 ücretsiz instance-saat/ay verilir; 7/24 AYAKTA tutmak (744 saat) tavana dayanır ve
+#   aşılırsa tüm ücretsiz servisler ay sonuna kadar askıya alınır → "uyandırma pingi" KURMUYORUZ,
+#   uyumasına İZİN VERİYORUZ. Bu bilinçli bir tercih (ölçüm: ayda 744 saat = tavan 750).
+services:
+  - type: web
+    name: astrovector
+    runtime: docker
+    plan: free
+    region: frankfurt
+    # KRİTİK: Blueprint'in varsayılanı `master`; bu depo `main` kullanıyor → açıkça yazılmalı.
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Sunucu `/` üzerinde istemci HTML'ini 200 ile verir → sağlık kapısı olarak kullanılabilir.
+    # (Yanıt gelmezse Render deploy'u geri alır; sessiz bozuk yayın olmaz.)
+    healthCheckPath: /
+    numInstances: 1
+    envVars:
+      # Niyet belgesi: değerler imajda da aynı; burada olması sürüklenmeyi engeller.
+      - key: GAME_BIND
+        value: 0.0.0.0
+      - key: ADMIN_BIND
+        value: 127.0.0.1
