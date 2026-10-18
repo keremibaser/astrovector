@@ -419,9 +419,17 @@ hata sınıfı. Ücretsiz Render Postgres'in bedeli: **30 gün sonra sona erer**
 - Uçtan uca, ayrı portlarda (8101/8102) kendi test anahtarıyla: admin komutu → `telemetry.critical` →
   kuyruk → otomatik flush → `backend/data/telemetry.ndjson`'a satır yazıldı ✓ ve `GET /healthz`
   sonrası `store.written.telemetry: 1`, `mode: "file"`, `surum: "2026-10-18l-M3a"` ✓.
-- **Yayın kanıtı (BEKLİYOR):** Render Blueprint senkronu sonrası `/healthz` → `store.mode: "pg"`; soğuk
-  başlangıçtan sonra `written` sayaçları ARTMAYA DEVAM EDİYORSA kalıcılık gerçekten kalıcıdır (süreç
-  yeniden doğduğunda veri DB'den geri gelir — dosya modunda bu imkânsızdı).
+- **YAYIN ÖLÇÜMÜ (16:37, ölçüldü):** push sonrası servis **kendiliğinden yeniden deploy edildi** ve yeni
+  build yayında: `GET /healthz` → `{"ok":true,"surum":"2026-10-18l-M3a", …}` ✓ (eski build bu ucu hiç
+  bilmiyordu, "game ws ok" düz metni dönüyordu — "önce" ölçümü olarak kaydedildi).
+  **AMA** `store:{mode:"file", requested:"file"}` → servis ortamında **`DATABASE_URL` YOK**; yani
+  `render.yaml`'daki `databases:` bloğu henüz uygulanmadı (Render belgesi: Blueprint değişiklikleri
+  varsayılan olarak push ile otomatik uygulanır, ama Auto Sync kapalıysa panelde **Manual Sync** gerekir;
+  servis Blueprint yerine elle "Web Service" olarak kurulduysa `render.yaml` hiç okunmaz — deploy'un
+  çalışıp veritabanının oluşmaması bu iki duruma da uyar).
+  **Sonuç:** kalıcılık yayında HÂLÂ SAHTE (dosya modu, soğuk başlangıçta silinir). Kapatma adımı:
+  Blueprint senkronu **veya** panelde ücretsiz Postgres + `DATABASE_URL` (Internal Database URL).
+  Doğrulama tek satır: `/healthz` → `store.mode: "pg"`.
 
 ### M3b — ENVANTER + ZANAAT BİRLEŞTİ (kullanıcı isteği, 2026-10-18) ✅ TAMAM
 Kontroller günceli: **C = ENVANTER/ZANAAT paneli** (birleşik), **H/G/J = eşya kullan** (panel
