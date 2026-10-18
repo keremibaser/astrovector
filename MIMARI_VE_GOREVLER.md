@@ -780,13 +780,28 @@ istemci `?anom=1` (frekans kutusunu açar), `?keyseq=<rakamlar>` (GERÇEK `keydo
       **Karşılaştırma (aynı kod, iki sağlayıcı):** Back4App/ABD **542 ms** ↔ Render/Frankfurt
       **230 ms** → bölge seçimi ölçülebilir şekilde gecikmeye yansıyor.
       BEKLEYEN: boşta uyuma → soğuk başlangıç ölçümü (`render-uyku-olc.sh`, 16,7 dk trafiksiz tek atış).
-- [ ] **BEKLEYEN (tek iddia):** "Back4App'in ücretsiz container'ı boşta UYUMAZ" — **ölçülmedi**.
-      Boşta 15+ dk sonra `WS_URL=wss://… npm run smoke` soğuk başlangıç (saniyeler) gösterirse
-      iddia YANLIŞ olur. Zamanlanmış kontrol: cron `6f0b7bf039ab` (45 dk sonra bir kez) — ancak
-      **Hermes gateway kapalı olduğu için henüz etkin değil**; gateway açılana kadar elle ölçülmeli.
-- [ ] **Bekleyen:** (1) özel domain (şu an TLS'i Back4App veriyor; istemci `wss://`'i `location.host`'tan
-      türettiği için domain alınsa da **kod değişmez**), (2) "container uyumaz" iddiasının boşta ölçümü
-      (yukarıdaki madde).
+- [x] **RENDER UYKU ÖLÇÜMÜ (2026-10-18 16:16, 16,7 dk trafiksiz):** ilk istek **12,52 s** ↔ hemen
+      ardından ikinci istek **0,27 s** (≈47 kat) → Render **uyudu ve uyandı**; dokümanın "~1 dakika"
+      dediği soğuk başlangıç bizde **12,5 saniye** çıktı (istenen yönde iyi haber). Ölçüm temizdi:
+      15:59:25'ten sonra hedefe hiç trafik atılmadı (önizleme sekmesi de kapatıldı).
+      **Trafik deseni (kod okuması, ölçüm değil):** istemci **5 sn'de bir `{t:'hb',c:++hbSeq}`** yollar
+      (`game-client/index.html`), sunucu aynı sayaçla yanıtlar ve istemci `ping`i bundan hesaplar.
+      Sonuçları iki yönlü:
+        · **Oyun ortasında uyku riski YOK** — bağlı bir istemci 5 sn'de bir *gelen* mesaj ürettiği için
+          Render 15 dk boşta kalmıyor (baştan endişelendiğim senaryo böylece çürüdü).
+        · **Ama açık unutulan bir sekme hizmeti 7/24 uyanık tutar** → ayda **744 saat**, ücretsiz tavan
+          **750 saat** → tavan aşılırsa tüm ücretsiz servisler ay sonuna kadar askıya alınır. Bu yüzden
+          "uyandırma pingi" KURMADIK; buna karşılık istemci hb'sinin **sekme görünürken** çalışması
+          (görünmezken susması) doğal ve etkili bir fren olurdu — bilinçli olarak YAPILMADI, aday iş
+          olarak duruyor (oynanışı değiştirmez: durum sunucu-otoriter, oyuncu sekmeden dönünce
+          yeniden bağlanır; bedeli ~12,5 sn soğuk başlangıç).
+- [x] **"Back4App bakımı boşta UYUMAZ" iddiası — ARTIK KONUSUZ (2026-10-18, ölçüldü).** Uyumadığı
+      doğruydu; ama 60 dakikalık ömrü dolunca **uyumadı, öldü**: yoklayıcı 15:52:51'de **200**,
+      15:53:52'de **404** + WS **502** gördü (ölü adres 404'ü ~0,55 s'de kenardan döndürüyor).
+      Yani "uyumaz" iyi bir barındırma gerekçesi DEĞİL — ömür ayrı eksen (bkz. Tuzak 63b).
+- [ ] **Bekleyen:** (1) özel domain (şu an TLS'i Render veriyor; istemci `wss://`'i `location.host`'tan
+      türettiği için domain alınsa da **kod değişmez**), (2) istemci hb'sinin sekme görünürlüğüne
+      bağlanması (açık unutulan sekme 750 saat tavanına dayanmasın — aday iş, yukarıda gerekçesiyle).
 
 ### Kapsam Dışı (Future Enhancements — şimdilik DOKUNMA)
 - PvP lonca/ekonomi sistemi, mobil native build, ses/müzik, i18n
