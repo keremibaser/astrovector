@@ -747,10 +747,24 @@ istemci `?anom=1` (frekans kutusunu açar), `?keyseq=<rakamlar>` (GERÇEK `keydo
 - [x] **Gerçek WebSocket smoke aracı:** `npm run smoke` (`backend/scripts/ws-smoke.mjs`) —
       `WS_URL` verilen sunucuya bağlanır, ilk `sn`'i bekler ve `jumpRange`(sayı)/`recipes`(dizi)/
       `items`(DOLU NESNE — dizi DEĞİL) alanlarını doğrular. Ölçüm (yerel): bağlantı 7 ms, `sn` 7 ms.
-- [ ] **Bekleyen:** (1) Back4App hesabı + repo bağlama + Dockerfile/port ayarı, (2) o hedefte
-      **uçtan uca canlı doğrulama** (WebSocket bağlanıyor mu, `hata=yok`, oyuncu sayısı artıyor mu),
-      (3) domain: yoksa `http://` + `ws://` çalışır; domain alınırsa Caddy/named tunnel TLS'i alır ve
-      istemci kendiliğinden `wss://`e geçer (kod değişmez).
+- [x] **CANLI YAYIN DOĞRULANDI (2026-10-18):** `https://astrovector-oyo45e0b.b4a.run`
+      (Back4App Containers — ücretsiz, **kart yok, hiçbir ortam değişkeni girilmedi**).
+      Ölçümler: `WS_URL=wss://… npm run smoke` → **exit 0**, bağlantı **542 ms**, `sn` **543 ms**
+      (`jumpRange=700`, `recipes=4`, `items=4`) · `GET /` → **200**, 207.465 bayt, servis edilen
+      damga **`SURUM=2026-10-18k-M5b`** (yayındaki imaj = en yeni commit) · `GET /starmap.json` →
+      **200**, **1.310.581 bayt** (yerel dosyayla birebir aynı boyut), `ETag: "20261017-16384"` +
+      `no-cache` (Tuzak 31 koruması yayında da çalışıyor) · tarayıcı probe `/?probe=1&lang=tr` →
+      `ws bagli`, `harita=16384 sunucuHarita=16384` (eşleşiyor → **warp açık**), `kaya=18`,
+      `yakit=45/45`, `kalkan=100`, `gelen=sn;du;…;shot;hb`, `tk=1255 son=1255` (kare ortasında hata
+      yok), **`hata=yok`** · admin portu `:8090` dışarıdan **HTTP 000 = erişilemez** ✓ güvenlik
+      sözleşmesi yayında korunuyor.
+- [ ] **BEKLEYEN (tek iddia):** "Back4App'in ücretsiz container'ı boşta UYUMAZ" — **ölçülmedi**.
+      Boşta 15+ dk sonra `WS_URL=wss://… npm run smoke` soğuk başlangıç (saniyeler) gösterirse
+      iddia YANLIŞ olur. Zamanlanmış kontrol: cron `6f0b7bf039ab` (45 dk sonra bir kez) — ancak
+      **Hermes gateway kapalı olduğu için henüz etkin değil**; gateway açılana kadar elle ölçülmeli.
+- [ ] **Bekleyen:** (1) özel domain (şu an TLS'i Back4App veriyor; istemci `wss://`'i `location.host`'tan
+      türettiği için domain alınsa da **kod değişmez**), (2) "container uyumaz" iddiasının boşta ölçümü
+      (yukarıdaki madde).
 
 ### Kapsam Dışı (Future Enhancements — şimdilik DOKUNMA)
 - PvP lonca/ekonomi sistemi, mobil native build, ses/müzik, i18n
