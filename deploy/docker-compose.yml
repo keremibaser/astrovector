@@ -11,7 +11,8 @@ services:
   game:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile
+      # Tek gerçek Dockerfile repo KÖKÜNDE (platformlar da onu arar) → drift yok.
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
       - ../.env.production
