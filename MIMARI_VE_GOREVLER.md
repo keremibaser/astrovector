@@ -537,6 +537,8 @@ dönüşüm oranını BEN ekledim. Üstelik testi de bu uydurma kurala göre yaz
 | **Tuzak 59** | **Yerel yardımcı fonksiyonu modül seviyesinde kullanmak** (`put` menü düzeninin İÇİNDE tanımlıydı; HUD çizimi onu çağırınca `Uncaught ReferenceError: put is not defined` → **her karede throw** ve HUD hiç çizilmedi). Doğrusu: HUD metinleri `BitmapText.set(metin, renk)` + `.sprite.x/y` kullanır. **Node testi bunu GÖRMEZ** (istemci HTML'i çalıştırılmıyor) — yalnız gerçek tarayıcıda `?probe=1` `hata=` alanı yakaladı. Yeni istemci kodu yazınca: `node --check` (parse) **yetmez**, tarayıcıda `hata=yok` görülmeli. |
 | **Tuzak 60** | **Probe'u log satırından okumak yanıltır.** İstemci log'u 40 kayıtlık HALKADIR ve `?m2h=` kancası 0,9 sn'de bir tarama yapıp 3 satır yazdığı için saniyede ~3 kayıt akar → 12 sn önceki kanıt (örn. `anom_wrong`) TAMAMEN silinir ("sunucu cevap vermiyor" sanılır — oysa cevap gelmişti). Kalıcı kanıt için **SAYAÇ** kullan: paket sayacı (`__rx`, `__anomKeys`, `__solveTry`) ya da `state.log.filter(...).length`. Yanıltıcı ölçüm, yokluğu kanıt saydırır. |
 | **Tuzak 61** | **"Yazılmış kod" ≠ "bağlı kod".** M4 anomali handler'ları (`handleSolveAnomaly`, ödül, i18n) BAŞTAN BERİ vardı; ama `room.anomaly` hiç oluşturulmuyordu, `solve_anom` dispatcher'a bağlı değildi, istemcide çizim/tuş yoktu → özellik **ölü koddu** ve SSOT "M4 ✅ TAMAM" diyordu. Bir özelliği "var" saymadan önce **dört katmanın hepsini** ara: (1) veri nesnesi üretiliyor mu, (2) mesaj dispatcher'da bağlı mı, (3) istemci gösteriyor mu, (4) uçtan uca TEST ölçüyor mu. Ayrıca `rayPick` hedef listesine eklenmeyen nesne "vurulmaz" (silent) kalır. |
+| **Tuzak 62** | **Platformlar Dockerfile'ı KÖKTE arar + imajdaki sabit port "ölü servis" üretir.** `deploy/Dockerfile` içinde `ENV PORT_GAME=8081` SABİTTİ; ama Back4App/Render/Cloud Run gibi platformlar `$PORT` env'i VERİR ve trafiği O porta yönlendirir → uygulama 8081'de dinlerken edge başka porta bakar: servis "ayakta ama erişilemez" olur (loglarda hata YOK). Düzeltme: imajda `PORT_GAME` **ENV'i yok** (sunucu `PORT_GAME \|\| PORT \|\| 8081` izler), HEALTHCHECK de `${PORT_GAME:-${PORT:-8081}}` kullanır, ve **tek gerçek Dockerfile köktedir** (`deploy/Dockerfile` yalnız işaretçi) — iki kopya "biri güncellenir, diğeri unutulur" sürüklenmesi üretir. Ölçüm: `PORT=10000 sh -c 'echo ${PORT_GAME:-${PORT:-8081}}'` → `10000`; `PORT_GAME=8081` verilince → `8081`. |
+| **Tuzak 63** | **"Ücretsiz barındırma" 2026'da ölçülmeden varsayılmaz.** Taze durum (2026-10): HF Spaces Temmuz 2026'dan beri Docker/Gradio Space'lerde **ücretli plan** istiyor; Koyeb Şubat 2026'dan beri **kart zorunlu** + boşta uyuyor ve uyanan WebSocket "birkaç dakika" yaşıyor; Fly.io/Heroku/Glitch ücretsiz katmanı **bitti**; Railway free ayda **$1 kredi** (7/24 çevirmez); Render kart istemiyor ama boşta **15 dk sonra uyur** (750 saat/ay + 5 GB bant, uyanma ~1 dk); Northflank **uyumaz** ama kart doğrulaması ister; Oracle Always Free 4/24 → **2 OCPU/12 GB** (Haziran 2026) ve kart ister; Cloudflare Quick Tunnel kart/hesap istemez ve WebSocket çalışır (SSE çalışmaz) ama **PC açık kalmalı** ve URL her açılışta değişir. Kural: "bedava + kart yok + 7/24 + WebSocket" dördü birden nadir — her adayı **uyuma davranışı, kart, çıkış trafiği, WebSocket** ekseninde ölç, sonra karar ver. |
 
 ### M3f — `start.bat` KILL ADIMI YALAN SÖYLÜYORDU + İKİNCİ TUR EADDRINUSE ✅
 Kullanıcı bildirimi (birebir): *"yok hala doldurulacak doteryum yok yazıyor ve yakıt doldurmuyor,
@@ -720,6 +722,24 @@ istemci `?anom=1` (frekans kutusunu açar), `?keyseq=<rakamlar>` (GERÇEK `keydo
 - [ ] Yıldız Yok Etme Silahı: global event protocol + kalıcı harita değişikliği (DB'ye yazılır)
 - [ ] Room mirror (50+ oyuncu belt), hibernate optimizasyonu
 - [ ] Deploy: Oracle VM (systemd + Caddy ws proxy) + Pages
+- [ ] **Deploy (kullanıcı kararı, 2026-10-18): ücretsiz PaaS.** Kullanıcı Oracle'ı reddetti
+      (*"oracle kullanmayalım başka free bul"*) ve "PC'ye bağlı olmasın, bulutta 7/24 dursun" dedi.
+      Adaylar ölçüldü (bkz. **Tuzak 63**). **Seçim: Back4App Containers** — kart istemez, "container'ı
+      uyutmaz", GitHub'dan Docker ile deploy eder, `$PORT` verir (bizde hazır). Yedekler: Northflank
+      (uyumaz ama kart doğrulaması ister) → Render (kart yok, boşta uyur; istemcide otomatik yeniden
+      bağlanma zaten var, `index.html` `ws.onclose` + 25 sn heartbeat).
+- [x] **Deploy hazırlığı (kod tarafı, 2026-10-18):** kök `Dockerfile` (platformlar kökte arar,
+      `deploy/Dockerfile` yalnız işaretçi) · `$PORT` uyumu — sabit `PORT_GAME` ENV'i kaldırıldı
+      (ölçüm: `PORT=10000` → 10000'de dinliyor) · `deriveWsUrl()` (adres sayfa origin'inden türer,
+      `https:` → `wss://`, `?ws=` kaçış kapısı) · admin yuvası `127.0.0.1` + bağlantı anında loopback
+      kapısı (`4003`) · `admin-client/` imaja ve `.dockerignore`'a BİLEREK girmez · `deploy/`
+      (compose+Caddy+systemd+`bootstrap.sh`/`upload.sh`).
+- [x] **Git deposu (2026-10-18):** `github.com/keremibaser/astrovector` (public) — 44 dosya,
+      `.env` ve `backend/data/` repoda YOK (ölçüldü), istemci HTML'i `PixiJS` istemcisi tek dosya.
+- [ ] **Bekleyen:** (1) Back4App hesabı + repo bağlama + Dockerfile/port ayarı, (2) o hedefte
+      **uçtan uca canlı doğrulama** (WebSocket bağlanıyor mu, `hata=yok`, oyuncu sayısı artıyor mu),
+      (3) domain: yoksa `http://` + `ws://` çalışır; domain alınırsa Caddy/named tunnel TLS'i alır ve
+      istemci kendiliğinden `wss://`e geçer (kod değişmez).
 
 ### Kapsam Dışı (Future Enhancements — şimdilik DOKUNMA)
 - PvP lonca/ekonomi sistemi, mobil native build, ses/müzik, i18n
