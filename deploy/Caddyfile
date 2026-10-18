@@ -1,0 +1,33 @@
+# AI'A NOT: Caddy yalnız TLS + proxy yapar; statik dosyaları da oyun sunucusu servis eder.
+# Nedeni: WebSocket upgrade'i `/` yolunda geliyor (istemci adresi location.host'tan türüyor) —
+# aynı origin'de hem statik hem WS varsa tek `reverse_proxy` yeter, yol çakışması çıkmaz.
+#
+# SITE_ADDRESS:
+#   - Domain gösterilmişse (DNS A kaydı sunucuya bakar):  oyun.example.com
+#     → Caddy Let's Encrypt sertifikasını OTOMATİK alır; istemci otomatik `wss://` kullanır.
+#   - Domain yoksa: `:80` yaz → yalnız http/ws (tarayıcı https isterse sertifika hatası verir).
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# WebSocket + statik istemci + /starmap.json hepsi oyun sunucusunda.
+	reverse_proxy game:8081 {
+		# WS upgrade başlıkları Caddy tarafından otomatik iletilir (Hop-by-hop yönetimi dahili).
+		header_up X-Real-IP {remote_host}
+	}
+
+	# Güvenlik başlıkları (oyun istemcisi tek dosya HTML; inline script/style KULLANIYOR →
+	# CSP'yi sıkı yazmak istemciyi kırar, o yüzden bilinçli olarak yalnız bunlar veriliyor).
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

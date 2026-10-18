@@ -1,0 +1,17 @@
+# AI'A NOT: İmaja girmemesi gerekenler. KURAL: sırlar ve yerel dosyalar imaja sızmaz.
+# admin-client/ BİLEREK dışarıda: admin yalnız yerel makinede açılır (kullanıcı sözleşmesi).
+.env
+.env.*
+!.env.example
+!deploy/.env.production.example
+.node_modules
+node_modules
+admin-client/
+**/test-*.mjs
+backend/scripts/
+.git
+.gitignore
+start.bat
+dev.sh
+*.log
+data/

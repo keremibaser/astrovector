@@ -1,0 +1,30 @@
+{
+  "name": "astrovector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "2D web-based space exploration & trading game — backend",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node --watch backend/server.js",
+    "genmap": "node backend/scripts/gen-map.mjs",
+    "peek": "node backend/scripts/admin-peek.mjs",
+    "inspect": "node backend/scripts/admin-inspect.mjs",
+    "test-admin": "node backend/scripts/test-admin-panel.mjs",
+    "test-warp": "node backend/scripts/test-warp-range.mjs",
+    "test-combat": "node backend/scripts/test-combat.mjs",
+    "test-fuel": "node backend/scripts/test-fuel.mjs",
+    "test-craft-boost": "node backend/scripts/test-craft-boost.mjs",
+    "test-pirates": "node backend/scripts/test-pirates.mjs",
+    "test-chat": "node backend/scripts/test-chat.mjs",
+    "test-i18n": "node backend/scripts/test-i18n.mjs",
+    "test-bat": "node backend/scripts/test-bat.mjs",
+    "test-m4": "node backend/scripts/test-milestone4.mjs",
+    "test-anomaly": "node backend/scripts/test-anomaly.mjs",
+    "test-all": "npm run test-bat && npm run test-i18n && npm run test-admin && npm run test-m4 && npm run test-anomaly && npm run test-warp && npm run test-combat && npm run test-fuel && npm run test-craft-boost && npm run test-pirates && npm run test-chat"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}

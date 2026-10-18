@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<!-- ==========================================================================
+AI'A NOT: admin-client/index.html — TANRI MODU PANELİ (STRICTLY LOCAL)
+===========================================================================
+GÜVENLİK SÖZLEŞMESİ:
+  - Bu dosya ASLA bir web servisine deploy edilmez. Sadece bu makinede açılır
+    (tarayıcıda file:// ile veya `npx serve admin-client` ile localhost:5555).
+  - ADMIN_SECRET_KEY .env'de okunur; burada sabit kodlanmaz. Panel açılışta key sorar.
+  - ws://localhost:8090/admin'e bağlanır; handshake'te adm:auth + key gönderilir.
+    Yanlış key → sunucu socket'i kapatır + IP 60 sn blacklist'ler.
+
+MILESTONE 4 — ADMIN TANRI MODU:
+  1. Galaxy overview render (tüm sistemler + canlı oyuncu/oda yerleşimleri + anomali/korsanlar)
+  2. adm:inspect canlı stream UI (hedef bilgi kartı + filtreler + durdurma/devam + event akışı)
+  3. adm:command: kill_player, spawn_asteroid, trigger_star_kill (supernova)
+  4. Canlı oda render (seçilen odanın canvas + tabloları)
+========================================================================== -->
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>AstroVector — Admin (LOCAL ONLY)</title>
+<style>
+  /* AI'A NOT: Karanlık, yoğun bilgi paneli. Monospace — log/JSON okunabilirliği için. */
+  body{margin:0;background:#0a0a12;color:#cfcfe0;font:13px monospace;display:flex;height:100vh;overflow:hidden}
+  #left{width:340px;border-right:1px solid #222;padding:12px;overflow-y:auto;flex:0 0 auto;display:flex;flex-direction:column;gap:6px}
+  #right{flex:1;padding:12px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+  h2{margin:6px 0 2px;font-size:13px;color:#7fd4ff;display:flex;justify-content:space-between;align-items:center}
+  .row{padding:4px 8px;border-radius:4px;cursor:pointer}
+  .row:hover{background:#1a1a2e}
+  .row.sel{background:#2a2a4e}
+  #stats{color:#8f8;margin-bottom:6px;white-space:pre;font-size:11px}
+  #stream{flex:1;overflow-y:auto;background:#050510;border:1px solid #222;padding:8px;white-space:pre-wrap;font-size:12px}
+  .ev{margin-bottom:3px;padding:2px 4px;border-radius:2px}
+  .ev .ts{color:#555}
+  .ev.combat{color:#ff8888;background:#200a0a}
+  .ev.movement{color:#88ff88}
+  .ev.admin{color:#ffff88;background:#202008}
+  .ev.room{color:#88d0ff}
+  .ev.system{color:#d088ff}
+  button{background:#1e1e3e;color:#cfcfe0;border:1px solid #333;padding:5px 10px;border-radius:4px;cursor:pointer;margin:2px;font:12px monospace}
+  button:hover:not(:disabled){background:#2e2e5e}
+  button:disabled{opacity:0.4;cursor:not-allowed}
+  #keybox{margin:12px 0}
+  input,select{background:#111;color:#cfcfe0;border:1px solid #333;padding:5px 7px;border-radius:4px;font:12px monospace}
+  input[type="text"],input[type="password"]{width:220px}
+  /* Tab Bar */
+  #tabBar{display:flex;gap:4px;border-bottom:1px solid #222;margin-bottom:8px;padding-bottom:4px}
+  .tab-btn{background:#141424;color:#889;border:1px solid #222;border-bottom:none;padding:6px 14px;border-radius:4px 4px 0 0;cursor:pointer}
+  .tab-btn:hover{background:#1a1a34;color:#fff}
+  .tab-btn.active{background:#242444;color:#7fd4ff;border-color:#383868;font-weight:bold}
+  /* Oda dökümü tabloları */
+  table{border-collapse:collapse;width:100%;font-size:11px;margin:6px 0 12px}
+  th,td{border:1px solid #222;padding:2px 6px;text-align:left;white-space:nowrap}
+  th{color:#7fd4ff;background:#101024}
+  td.num{text-align:right}
+  .bar{display:inline-block;width:36px;height:6px;background:#1a2a3a;vertical-align:middle}
+  .bar > i{display:block;height:6px}
+  .tag{color:#666}
+  .low{color:#f88}
+  h3{margin:10px 0 2px;font-size:12px;color:#9fe}
+  #roomView{flex:1;overflow-y:auto;background:#050510;border:1px solid #222;padding:8px;display:none}
+  #roomLive{display:none;margin-bottom:8px}
+  #roomCanvas{background:#04040c;border:1px solid #222;width:100%;height:auto;image-rendering:pixelated;display:block}
+  #roomLegend{margin-top:4px;font-size:11px;color:#667}
+  #liveDot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3f6;margin-right:5px}
+  /* Galaxy Overview */
+  #galaxyLive{display:block;margin-bottom:8px;position:relative}
+  #galaxyCanvas{background:#020208;border:1px solid #222;width:100%;height:auto;image-rendering:pixelated;display:block;cursor:grab}
+  #galaxyCanvas:active{cursor:grabbing}
+  #galLegend{margin-top:4px;font-size:11px;color:#667;display:flex;justify-content:space-between;align-items:center}
+  #galTooltip{position:absolute;background:rgba(8,8,16,0.92);border:1px solid #446;padding:5px 9px;border-radius:4px;font-size:11px;pointer-events:none;display:none;z-index:10;color:#efefef}
+  /* Target Card & Stream Controls */
+  #streamView{display:none;flex-direction:column;flex:1;min-height:0}
+  #targetCard{background:#101024;border:1px solid #223;padding:8px 12px;margin-bottom:6px;border-radius:4px;font-size:12px}
+  #streamControls{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+  .filter-pill{background:#16162a;border:1px solid #334;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:11px}
+  .filter-pill.active{background:#2b2b54;color:#7fd4ff;border-color:#5a5a9c}
+  /* God Mode Box */
+  .cmd-box{background:#101020;border:1px solid #223;padding:6px 8px;border-radius:4px;margin-top:4px}
+  .cmd-title{font-size:11px;color:#99a;margin-bottom:4px;font-weight:bold}
+  .cmd-row{display:flex;gap:4px;align-items:center;margin-bottom:4px}
+</style>
+</head>
+<body>
+<div id="left">
+  <h2>Server Stats</h2>
+  <div id="stats">disconnected</div>
+
+  <h2>Rooms <span class="tag" id="roomCount"></span></h2>
+  <div id="rooms" style="max-height:160px;overflow-y:auto">—</div>
+
+  <h2>Players <span class="tag" id="playerCount"></span></h2>
+  <div id="players" style="max-height:160px;overflow-y:auto">—</div>
+
+  <h2>Yıldız / Oda Seçici</h2>
+  <div class="cmd-box">
+    <div class="cmd-title">HERHANGİ BİR YILDIZI İZLE</div>
+    <div class="cmd-row">
+      <input id="starNavInput" type="text" placeholder="Star ID (örn: 0, 7071) veya İsim" style="flex:1">
+      <button id="starNavBtn" style="background:#1e3e2e;color:#88ffaa">İzle</button>
+    </div>
+    <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+      <button id="navHomeBtn" style="font-size:10px;padding:2px 5px">Ev (s6063)</button>
+      <button id="navStationBtn" style="font-size:10px;padding:2px 5px">İstasyon (s7071)</button>
+      <button id="navStation2Btn" style="font-size:10px;padding:2px 5px">İstasyon (s10069)</button>
+    </div>
+  </div>
+
+  <h2>God Mode Controls</h2>
+  <div class="cmd-box">
+    <div class="cmd-title">PLAYER COMMANDS</div>
+    <button id="killBtn" style="width:100%" disabled>Kill Selected Player</button>
+  </div>
+
+  <div class="cmd-box">
+    <div class="cmd-title">SPAWN ASTEROID</div>
+    <div class="cmd-row">
+      <input id="spawnRoom" type="text" placeholder="Room ID (e.g. s0)" style="width:100px">
+      <select id="spawnOre" style="flex:1">
+        <option value="">Rastgele Cevher</option>
+        <option value="DOTERYUM">DOTERYUM (Yakit)</option>
+        <option value="TITAN">TITAN</option>
+        <option value="SILICON">SILICON</option>
+        <option value="REZONANS">REZONANS</option>
+        <option value="BAKIR">BAKIR</option>
+        <option value="DEMIR">DEMIR</option>
+      </select>
+    </div>
+    <div class="cmd-row">
+      <input id="spawnSize" type="number" placeholder="Boyut (10-40)" value="24" style="width:100px">
+      <button id="spawnRockBtn" style="flex:1" disabled>Kaya Doğur</button>
+    </div>
+  </div>
+
+  <div class="cmd-box">
+    <div class="cmd-title">SUPERNOVA TRIGGER (STAR-KILL)</div>
+    <div class="cmd-row">
+      <input id="starKillId" type="number" placeholder="Star ID (0-16383)" style="flex:1">
+      <button id="starKillBtn" style="background:#4a1212;color:#ff9999" disabled>Supernova Tetikle</button>
+    </div>
+  </div>
+
+  <div style="margin-top:6px">
+    <button id="refreshBtn" style="width:100%" disabled>Tümünü Yenile (Refresh)</button>
+    <label class="tag" style="display:block;margin-top:4px">
+      <input type="checkbox" id="autoRefresh" checked style="width:auto"> 5 sn otomatik yenile
+    </label>
+  </div>
+</div>
+
+<div id="right">
+  <div id="tabBar">
+    <button class="tab-btn active" id="tabGalaxy">🌌 Galaxy Overview</button>
+    <button class="tab-btn" id="tabRoom">🪐 Room Live View</button>
+    <button class="tab-btn" id="tabStream">📡 Inspection Stream</button>
+  </div>
+
+  <h2 id="streamTitle" style="margin-top:0">Galaxy Overview — 16384 Stars</h2>
+
+  <div id="keybox">
+    <input id="keyInput" type="password" placeholder="ADMIN_SECRET_KEY (.env'deki)">
+    <button id="connectBtn">Connect</button>
+    <div style="color:#666;margin-top:6px;font-size:11px">
+      Anahtar proje kökündeki <b>.env</b> dosyasındadır (<code>ADMIN_SECRET_KEY=...</code>)<br>
+      Girilen anahtar tarayıcıda saklanır, bir daha sorulmaz.
+    </div>
+  </div>
+
+  <!-- 1) Galaxy Overview View -->
+  <div id="galaxyLive">
+    <canvas id="galaxyCanvas" width="880" height="470"></canvas>
+    <div id="galTooltip"></div>
+    <div id="galLegend">
+      <div>
+        <span style="color:#8f8">● CANLI ODALAR</span> &nbsp;
+        <span style="color:#f66">▲ KORSAN</span> &nbsp;
+        <span style="color:#fa4">★ ANOMALİ</span> &nbsp;
+        <span style="color:#f33">✖ SUPERNOVA</span>
+      </div>
+      <div>
+        <button id="galZoomIn">+</button>
+        <button id="galZoomOut">-</button>
+        <button id="galReset">Galaxy Fit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2) Room Live View -->
+  <div id="roomLive">
+    <canvas id="roomCanvas" width="880" height="470"></canvas>
+    <div id="roomLegend"></div>
+  </div>
+  <div id="roomView"></div>
+
+  <!-- 3) Inspection Stream View -->
+  <div id="streamView">
+    <div id="targetCard">Hedef seçilmedi. Soldan bir oyuncuya veya odadaki bir nesneye tıkla.</div>
+    <div id="streamControls">
+      <span class="tag">Filtre:</span>
+      <span class="filter-pill active" data-filter="all">Tümü</span>
+      <span class="filter-pill" data-filter="combat">Savaş</span>
+      <span class="filter-pill" data-filter="movement">Hareket</span>
+      <span class="filter-pill" data-filter="room">Oda</span>
+      <span class="filter-pill" data-filter="admin">Admin</span>
+      <input id="streamSearch" type="text" placeholder="Filtrele..." style="width:140px;margin-left:auto">
+      <button id="streamPauseBtn">Durdur</button>
+      <button id="streamClearBtn">Temizle</button>
+    </div>
+    <div id="stream">No inspection active. Bir oyuncuya tıkla → canlı event stream.</div>
+  </div>
+</div>
+
+<script>
+// ===========================================================================
+// CONFIG & STATE
+// ===========================================================================
+const ADMIN_WS_URL = 'ws://localhost:8090';
+const LS_KEY = 'astrovector.adminKey';
+let ws = null, selected = null, selectedRoom = null, inspecting = null;
+let pollTimer = null, liveRoom = null, roomTimer = null, lastTableAt = 0, roomDirty = true;
+let currentTab = 'galaxy';
+let streamPaused = false;
+let streamFilter = 'all';
+let streamSearchText = '';
+const streamBuffer = [];
+
+const ROOM_POLL_MS = 250;
+const ROOM_TABLE_MS = 2000;
+const REFUEL_RING = 700;
+const ORE_COL = { DEMIR: '#a8b0bd', BAKIR: '#c07a3a', TITAN: '#8bd3ff', SILICON: '#8cff9e', REZONANS: '#d08cff', DOTERYUM: '#5ad0ff' };
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+// ===========================================================================
+// GALAXY OVERVIEW DATA & CAMERA
+// ===========================================================================
+let galaxyData = null;
+let galaxyOverviewData = null;
+let galCam = { x: 0, y: 0, zoom: 0.030 };
+let isDraggingGal = false, dragStart = { x: 0, y: 0 }, camStart = { x: 0, y: 0 };
+
+function initGalaxy() {
+  if (typeof fetch !== 'undefined') {
+    fetch('http://localhost:8081/starmap.json')
+      .then(r => r.json())
+      .then(data => {
+        galaxyData = data;
+        drawGalaxy();
+      })
+      .catch(() => {
+        galaxyData = generateFallbackGalaxy(20261017, 16384, 13000);
+        drawGalaxy();
+      });
+  } else {
+    galaxyData = generateFallbackGalaxy(20261017, 16384, 13000);
+  }
+}
+
+function generateFallbackGalaxy(seed, count, radius) {
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const rnd = mulberry32(seed);
+  const stars = [];
+  const classes = [0, 1, 2, 3, 4, 5, 6];
+  for (let i = 0; i < count; i++) {
+    const r = Math.sqrt(rnd()) * radius;
+    const arm = Math.floor(rnd() * 2);
+    const spiralAngle = r / 2000 + arm * Math.PI;
+    const spread = (rnd() - 0.5) * (0.85 - r / radius * 0.35);
+    const angle = spiralAngle + spread;
+    const x = Math.round(Math.cos(angle) * r);
+    const y = Math.round(Math.sin(angle) * r);
+    const c = classes[Math.floor(rnd() * classes.length)];
+    const a = rnd() < 0.04 ? 'ANOMALY' : null;
+    stars.push({ i, n: 'Star-' + i, x, y, c, k: 'G', a, p: Math.floor(rnd() * 9), b: 1 });
+  }
+  return { seed, radius, count, stars };
+}
+
+// ===========================================================================
+// TAB NAVIGATION
+// ===========================================================================
+function switchTab(tab) {
+  currentTab = tab;
+  $('tabGalaxy').classList.toggle('active', tab === 'galaxy');
+  $('tabRoom').classList.toggle('active', tab === 'room');
+  $('tabStream').classList.toggle('active', tab === 'stream');
+
+  if (tab === 'galaxy') {
+    $('galaxyLive').style.display = 'block';
+    $('roomLive').style.display = 'none';
+    $('roomView').style.display = 'none';
+    $('streamView').style.display = 'none';
+    $('stream').style.display = 'none';
+    $('streamTitle').textContent = `Galaxy Overview — 16384 Stars`;
+    stopRoomPoll();
+    drawGalaxy();
+  } else if (tab === 'room') {
+    $('galaxyLive').style.display = 'none';
+    $('roomLive').style.display = 'block';
+    $('roomView').style.display = 'block';
+    $('streamView').style.display = 'none';
+    $('stream').style.display = 'none';
+    if (selectedRoom) {
+      $('streamTitle').textContent = `Room ${selectedRoom} — CANLI (${ROOM_POLL_MS}ms)`;
+      startRoomPoll(selectedRoom);
+    } else {
+      $('streamTitle').textContent = `Room View — Lütfen soldan bir oda seçin`;
+    }
+  } else if (tab === 'stream') {
+    $('galaxyLive').style.display = 'none';
+    $('roomLive').style.display = 'none';
+    $('roomView').style.display = 'none';
+    $('streamView').style.display = 'flex';
+    $('stream').style.display = 'block';
+    stopRoomPoll();
+    $('streamTitle').textContent = inspecting ? `Inspection Stream — ${inspecting.kind} ${inspecting.id}` : `Inspection Stream`;
+  }
+}
+
+$('tabGalaxy').onclick = () => switchTab('galaxy');
+$('tabRoom').onclick = () => switchTab('room');
+$('tabStream').onclick = () => switchTab('stream');
+
+// ===========================================================================
+// BAĞLANTI & AUTH
+// ===========================================================================
+$('connectBtn').onclick = connect;
+$('keyInput').addEventListener('keydown', e => e.key === 'Enter' && connect());
+$('autoRefresh').onchange = () => { if ($('autoRefresh').checked) startPoll(); else stopPoll(); };
+
+const savedKey = localStorage.getItem(LS_KEY);
+if (savedKey) { $('keyInput').value = savedKey; connect(); }
+
+function connect() {
+  const key = $('keyInput').value.trim();
+  if (!key) return alert('ADMIN_SECRET_KEY gir (proje kökündeki .env dosyasındaki değer)');
+  ws = new WebSocket(ADMIN_WS_URL);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ t: 'adm:auth', key }));
+  };
+  ws.onclose = (e) => {
+    $('stats').textContent = `closed: ${e.reason || e.code}`;
+    setUI(false);
+    stopPoll();
+    stopRoomPoll();
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      handle(msg);
+    } catch {}
+  };
+}
+
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+function startPoll() { if (!pollTimer) pollTimer = setInterval(refreshAll, 5000); }
+function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+// ===========================================================================
+// MESAJ İŞLEME
+// ===========================================================================
+function handle(msg) {
+  switch (msg.t) {
+    case 'adm:auth_ok':
+      $('keybox').style.display = 'none';
+      setUI(true);
+      localStorage.setItem(LS_KEY, localStorage.getItem(LS_KEY) || $('keyInput').value.trim());
+      $('stats').textContent = JSON.stringify(msg.stats, null, 2);
+      initGalaxy();
+      refreshAll();
+      if ($('autoRefresh').checked) startPoll();
+      break;
+
+    case 'adm:players':
+      renderPlayers(msg.players || []);
+      break;
+
+    case 'adm:rooms':
+      renderRooms(msg.rooms || []);
+      if (msg.stats) $('stats').textContent = JSON.stringify(msg.stats, null, 2);
+      break;
+
+    case 'adm:room':
+      liveRoom = msg.room;
+      drawRoom();
+      if (roomDirty || Date.now() - lastTableAt > ROOM_TABLE_MS) {
+        renderRoomDetail(msg.room);
+        lastTableAt = Date.now();
+        roomDirty = false;
+      }
+      break;
+
+    case 'adm:galaxy':
+      galaxyOverviewData = msg.overview;
+      if (currentTab === 'galaxy') drawGalaxy();
+      break;
+
+    case 'adm:command_res':
+      appendEvent({
+        ts: Date.now(),
+        kind: 'admin',
+        targetId: msg.op,
+        data: `Command result: ${msg.op} ok=${msg.ok} ${JSON.stringify(msg)}`
+      });
+      refreshAll();
+      break;
+
+    case 'adm:tick':
+      $('stats').textContent = JSON.stringify(msg.stats, null, 2);
+      refreshAll();
+      break;
+
+    case 'adm:snap':
+      updateTargetCard(msg.snapshot);
+      appendEvent({ ts: Date.now(), kind: 'admin', targetId: inspecting?.id || '-', data: `INSPECT SNAPSHOT: ${JSON.stringify(msg.snapshot)}` });
+      for (const ev of msg.recent || []) appendEvent(ev);
+      break;
+
+    case 'adm:stream':
+      if (!streamPaused) {
+        for (const ev of msg.events) appendEvent(ev);
+      }
+      break;
+
+    case 'adm:error':
+      appendEvent({ ts: Date.now(), kind: 'admin', targetId: 'error', data: `[ADMIN ERROR] ${msg.code}` });
+      break;
+  }
+}
+
+function refreshAll() {
+  send({ t: 'adm:command', op: 'list_rooms', args: {} });
+  send({ t: 'adm:command', op: 'list_players', args: {} });
+  send({ t: 'adm:command', op: 'galaxy_overview', args: {} });
+  if (selectedRoom) send({ t: 'adm:command', op: 'room_detail', args: { id: selectedRoom } });
+}
+
+// ===========================================================================
+// ODA SEÇİMİ
+// ===========================================================================
+function renderRooms(list) {
+  const host = $('rooms');
+  $('roomCount').textContent = `(${list.length})`;
+  if (!list.length) { host.textContent = 'oda yok'; return; }
+  host.innerHTML = '';
+  for (const r of list) {
+    const row = document.createElement('div');
+    row.className = 'row' + (r.id === selectedRoom ? ' sel' : '');
+    const star = r.star
+      ? `${esc(r.star.n)} <span class="tag">(${esc(r.star.k)}${r.star.a ? ' !' + esc(r.star.a) : ''})</span>`
+      : '<span class="tag">bilinmeyen yildiz</span>';
+    const idle = r.players === 0 ? ` <span class="tag">bosta ${Math.round(r.idleMs / 1000)}sn</span>` : '';
+    row.innerHTML = `<b>${esc(r.id)}</b><br>${star}<br>` +
+      `<span class="tag">oyuncu ${r.players} · kaya ${r.rocks}</span>${idle}`;
+    row.onclick = () => selectRoom(r.id);
+    host.appendChild(row);
+  }
+}
+
+function selectRoom(id) {
+  selectedRoom = id;
+  selected = null;
+  $('spawnRoom').value = id;
+  const starId = id.replace(/^s/, '').split('-')[0];
+  $('starKillId').value = starId;
+
+  document.querySelectorAll('#players .row.sel').forEach(r => r.classList.remove('sel'));
+  switchTab('room');
+  $('streamTitle').textContent = `Room ${id} — CANLI (${ROOM_POLL_MS}ms)`;
+  roomDirty = true;
+  send({ t: 'adm:command', op: 'room_detail', args: { id } });
+  startRoomPoll(id);
+}
+
+function startRoomPoll(id) {
+  stopRoomPoll();
+  roomTimer = setInterval(() => send({ t: 'adm:command', op: 'room_detail', args: { id } }), ROOM_POLL_MS);
+}
+function stopRoomPoll() { if (roomTimer) { clearInterval(roomTimer); roomTimer = null; } }
+
+// ===========================================================================
+// CANLI ODA RENDER'I
+// ===========================================================================
+function drawRoom() {
+  const cv = $('roomCanvas'), g = cv.getContext('2d');
+  const W = cv.width, H = cv.height, cx = W / 2, cy = H / 2;
+  g.fillStyle = '#04040c'; g.fillRect(0, 0, W, H);
+  if (!liveRoom) {
+    g.fillStyle = '#556'; g.font = '14px monospace';
+    g.fillText('oda verisi yok (hibernasyona girmis olabilir)', 16, 28);
+    return;
+  }
+  const room = liveRoom;
+  let maxR = 900;
+  const feed = (x, y, extra) => { maxR = Math.max(maxR, Math.hypot(x, y) + (extra || 0)); };
+  for (const r of room.rocks) feed(r.x, r.y, r.size);
+  for (const p of room.players) feed(p.x, p.y, 40);
+  for (const k of (room.pickups || [])) feed(k.x, k.y, 20);
+  if (room.station) feed(room.station.x, room.station.y, 60);
+  for (const n of (room.npcs || [])) feed(n.x, n.y, 30);
+  const sc = (Math.min(W, H) / 2 - 22) / maxR;
+
+  g.strokeStyle = '#101828'; g.lineWidth = 1;
+  for (let rr = 500; rr <= maxR; rr += 500) { g.beginPath(); g.arc(cx, cy, rr * sc, 0, 6.2832); g.stroke(); }
+
+  g.strokeStyle = '#2f6fa8'; g.setLineDash([6, 8]);
+  g.beginPath(); g.arc(cx, cy, REFUEL_RING * sc, 0, 6.2832); g.stroke();
+  g.setLineDash([]);
+
+  const starCol = ['#9fd8ff', '#bcd4ff', '#ffffff', '#fff3c4', '#ffe08a', '#ffb46b', '#ff6f6f'][room.star ? room.star.c : 2] || '#fff';
+  g.fillStyle = starCol;
+  g.beginPath(); g.arc(cx, cy, Math.max(4, 28 * sc), 0, 6.2832); g.fill();
+  g.globalAlpha = 0.25; g.beginPath(); g.arc(cx, cy, Math.max(8, 60 * sc), 0, 6.2832); g.fill(); g.globalAlpha = 1;
+
+  // Korsan İstasyonu (varsa)
+  if (room.station) {
+    const st = room.station;
+    const sx = cx + st.x * sc, sy = cy + st.y * sc;
+    const rad = Math.max(8, (st.radius || 44) * sc);
+    g.fillStyle = '#3a1818';
+    g.strokeStyle = '#ff4444';
+    g.lineWidth = 2;
+    g.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4;
+      const px = sx + Math.cos(a) * rad;
+      const py = sy + Math.sin(a) * rad;
+      if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+    }
+    g.closePath();
+    g.fill();
+    g.stroke();
+
+    g.fillStyle = '#ff8833';
+    g.beginPath();
+    g.arc(sx, sy, Math.max(3, rad * 0.4), 0, 6.2832);
+    g.fill();
+
+    g.fillStyle = '#ff6666';
+    g.font = '10px monospace';
+    g.fillText(`[KORSAN ISTASYONU]`, sx + rad + 6, sy - 4);
+    const bw = 50;
+    g.fillStyle = '#ff3333';
+    g.fillRect(sx + rad + 6, sy + 2, bw * Math.max(0, st.hp) / (st.maxHp || 320), 4);
+  }
+
+  // Korsan Gemileri (NPC)
+  for (const n of (room.npcs || [])) {
+    const x = cx + n.x * sc, y = cy + n.y * sc;
+    g.save();
+    g.translate(x, y);
+    g.rotate((n.r || 0) + Math.PI);
+    g.fillStyle = '#ff3333';
+    g.beginPath();
+    g.moveTo(0, -8);
+    g.lineTo(5, 6);
+    g.lineTo(0, 2);
+    g.lineTo(-5, 6);
+    g.closePath();
+    g.fill();
+    g.restore();
+
+    g.fillStyle = '#ff8888';
+    g.font = '10px monospace';
+    g.fillText(n.callsign || n.id, x + 8, y - 5);
+    const bw = 28;
+    g.fillStyle = '#ff4444';
+    g.fillRect(x - bw / 2, y + 9, bw * Math.max(0, n.hp) / (n.maxHp || 70), 3);
+  }
+
+  for (const r of room.rocks) {
+    const x = cx + r.x * sc, y = cy + r.y * sc, rad = Math.max(2, (r.size / 2) * sc);
+    g.fillStyle = '#2a2d35';
+    g.beginPath(); g.arc(x, y, rad, 0, 6.2832); g.fill();
+    g.strokeStyle = ORE_COL[r.ore] || '#777'; g.lineWidth = 1;
+    g.beginPath(); g.arc(x, y, rad, 0, 6.2832); g.stroke();
+    if (r.hp < r.maxHp) {
+      g.strokeStyle = '#ff9a5a'; g.lineWidth = 2;
+      g.beginPath(); g.arc(x, y, rad, -1.5708, -1.5708 + 6.2832 * (r.hp / r.maxHp)); g.stroke();
+    }
+  }
+
+  for (const k of (room.pickups || [])) {
+    const x = cx + k.x * sc, y = cy + k.y * sc, s = 6;
+    g.fillStyle = ORE_COL[k.ore] || '#fff';
+    g.beginPath();
+    g.moveTo(x, y - s);
+    g.lineTo(x + s, y);
+    g.lineTo(x, y + s);
+    g.lineTo(x - s, y);
+    g.closePath(); g.fill();
+    g.globalAlpha = 0.18; g.beginPath(); g.arc(x, y, s + 6, 0, 6.2832); g.fill(); g.globalAlpha = 1;
+  }
+
+  for (const p of room.players) {
+    if (!p.tractor) continue;
+    const t = room.rocks.find(r => r.id === p.tractor) || (room.pickups || []).find(k => k.id === p.tractor);
+    if (!t) continue;
+    g.strokeStyle = '#3f6'; g.globalAlpha = 0.4;
+    g.beginPath(); g.moveTo(cx + p.x * sc, cy + p.y * sc); g.lineTo(cx + t.x * sc, cy + t.y * sc); g.stroke();
+    g.globalAlpha = 1;
+  }
+
+  for (const p of room.players) {
+    const x = cx + p.x * sc, y = cy + p.y * sc;
+    g.save();
+    g.translate(x, y); g.rotate(p.r + Math.PI);
+    g.fillStyle = p.warnings ? '#ff8a8a' : '#9fe0ff';
+    g.beginPath();
+    g.moveTo(0, -9);
+    g.lineTo(6, 7);
+    g.lineTo(0, 3);
+    g.lineTo(-6, 7);
+    g.closePath(); g.fill();
+    g.restore();
+    if (p.id === selected) {
+      g.strokeStyle = '#ff0'; g.lineWidth = 1;
+      g.beginPath(); g.arc(x, y, 14, 0, 6.2832); g.stroke();
+      g.beginPath(); g.moveTo(x - 18, y); g.lineTo(x - 11, y); g.moveTo(x + 11, y); g.lineTo(x + 18, y);
+      g.moveTo(x, y - 18); g.lineTo(x, y - 11); g.moveTo(x, y + 11); g.lineTo(x, y + 18); g.stroke();
+    }
+    g.fillStyle = '#cfcfe0'; g.font = '11px monospace';
+    g.fillText(p.callsign || p.id, x + 11, y - 6);
+    const bw = 34;
+    g.fillStyle = '#7fd4ff'; g.fillRect(x - bw / 2, y + 11, bw * Math.max(0, p.shield) / 100, 3);
+    g.fillStyle = '#ff9a4a'; g.fillRect(x - bw / 2, y + 15, bw * Math.max(0, p.hull) / 100, 3);
+    if (p.fuel < 5) { g.fillStyle = '#f66'; g.fillText('YAKIT!', x + 11, y + 6); }
+  }
+
+  g.strokeStyle = '#222'; g.strokeRect(0.5, 0.5, W - 1, H - 1);
+  g.fillStyle = '#556'; g.font = '12px monospace';
+  g.fillText(`menzil ${Math.round(maxR)} birim · olcek ${sc.toFixed(3)} px/birim`, 10, H - 24);
+  g.fillText('MAVI KESIKLI = yakit dolum bolgesi (700) · YAY = kaya hasari · yesil cizgi = tractor', 10, H - 8);
+}
+
+function bar(v, max, color) {
+  const k = Math.max(0, Math.min(1, (v || 0) / max));
+  return `<span class="bar"><i style="width:${Math.round(36 * k)}px;background:${color}"></i></span> ${Math.round(v || 0)}`;
+}
+
+function renderRoomDetail(room) {
+  if (!room) {
+    $('roomView').innerHTML = '<span class="tag">oda bulunamadi (hibernasyona girmis olabilir)</span>';
+    $('roomLegend').textContent = '';
+    return;
+  }
+  const npcs = room.npcs || [];
+  const pirStr = npcs.length ? ` · korsan ${npcs.length}` : '';
+  const stStr = room.station ? ` · istasyon [HP ${room.station.hp}/${room.station.maxHp}]` : '';
+  $('roomLegend').innerHTML = `<span id="liveDot"></span>CANLI · oyuncu ${room.players.length}${pirStr}${stStr} · ` +
+    `kaya ${room.rocks.length} · kapsul ${(room.pickups || []).length} · ` +
+    `son paket ${new Date().toLocaleTimeString()}`;
+  const st = room.star;
+  let h = `<h3>${esc(room.id)}</h3>`;
+  h += `<div class="tag">yildiz: ${st ? `${esc(st.n)} (${esc(st.k)}${st.a ? ' !' + esc(st.a) : ''}) gezegen ${st.p} · x=${st.x} y=${st.y}` : 'bilinmiyor'}`
+    + `${room.lastEmptyAt ? ` · bosta: ${Math.round((Date.now() - room.lastEmptyAt) / 1000)}sn` : ''}</div>`;
+
+  if (room.station) {
+    const s = room.station;
+    h += `<div style="background:#220c0c;border:1px solid #772020;padding:6px 10px;margin:6px 0;border-radius:4px;display:flex;justify-content:space-between;align-items:center">` +
+      `<span><b style="color:#ff6666">KORSAN İSTASYONU (${esc(s.id)})</b> · Konum: (${s.x}, ${s.y})</span>` +
+      `<span>Gövde: ${bar(s.hp, s.maxHp || 320, '#ff4444')} (${s.hp}/${s.maxHp || 320})</span>` +
+      `</div>`;
+  }
+
+  if (npcs.length) {
+    h += `<h3>Korsan Gemileri (${npcs.length})</h3>`;
+    h += '<table><tr><th>id</th><th>callsign</th><th>x</th><th>y</th><th>yon</th><th>govde</th></tr>';
+    for (const n of npcs) {
+      h += `<tr><td class="num">${esc(n.id)}</td><td style="color:#ff8888"><b>${esc(n.callsign)}</b></td>` +
+        `<td class="num">${n.x}</td><td class="num">${n.y}</td><td class="num">${n.r}</td>` +
+        `<td>${bar(n.hp, n.maxHp || 70, '#ff4444')}</td></tr>`;
+    }
+    h += '</table>';
+  }
+
+  h += `<h3>Oyuncular (${room.players.length})</h3>`;
+  if (!room.players.length) h += '<div class="tag">oyuncu yok — oda hibernasyon bekliyor</div>';
+  else {
+    h += '<table><tr><th>id</th><th>callsign</th><th>x</th><th>y</th><th>yon</th><th>kalkan</th><th>govde</th><th>yakit</th><th>kargo</th><th>K/D</th><th>tractor</th><th>uyari</th><th>son msg</th><th>islem</th></tr>';
+    for (const p of room.players) {
+      const cargo = Object.entries(p.cargo || {}).filter(([, n]) => n > 0).map(([o, n]) => `${o}:${n}`).join(' ') || '—';
+      h += `<tr><td class="num">${p.id}</td><td><b>${esc(p.callsign)}</b></td>` +
+        `<td class="num">${p.x}</td><td class="num">${p.y}</td><td class="num">${p.r}</td>` +
+        `<td>${bar(p.shield, 100, '#7fd4ff')}</td><td>${bar(p.hull, 100, '#ff9a4a')}</td>` +
+        `<td>${bar(p.fuel, 45, p.fuel < 5 ? '#f66' : '#8fe0c0')}</td>` +
+        `<td>${esc(cargo)}</td><td class="num">${p.kills}/${p.deaths}</td>` +
+        `<td>${p.tractor ? 'kaya ' + p.tractor : '—'}</td>` +
+        `<td class="${p.warnings ? 'low' : ''}">${p.warnings || 0}</td><td class="num">${p.lastMsgMs}ms</td>` +
+        `<td><button onclick="selectPlayer('${p.id}')">Inspect</button></td></tr>`;
+    }
+    h += '</table>';
+  }
+
+  h += `<h3>Kayalar (${room.rocks.length})</h3>`;
+  h += '<table><tr><th>id</th><th>x</th><th>y</th><th>boy</th><th>hp</th><th>cevher</th></tr>';
+  for (const r of room.rocks) {
+    const hurt = r.hp < r.maxHp;
+    h += `<tr><td class="num">${r.id}</td><td class="num">${r.x}</td><td class="num">${r.y}</td>` +
+      `<td class="num">${r.size}</td><td class="num ${hurt ? 'low' : ''}">${r.hp}/${r.maxHp}</td>` +
+      `<td>${esc(r.ore || '—')}</td></tr>`;
+  }
+  h += '</table>';
+
+  const picks = room.pickups || [];
+  h += `<h3>Dusen kapsuller (${picks.length})</h3>`;
+  h += picks.length
+    ? '<table><tr><th>id</th><th>x</th><th>y</th><th>cevher</th><th>miktar</th></tr>'
+      + picks.map(k => `<tr><td class="num">${esc(k.id)}</td><td class="num">${k.x}</td><td class="num">${k.y}</td>` +
+        `<td>${esc(k.ore)}</td><td class="num">${k.amount}</td></tr>`).join('')
+      + '</table>'
+    : '<div class="tag">uzayda kapsul yok</div>';
+
+  h += `<h3>Bekleyen eventler (${room.events.length})</h3>`;
+  h += room.events.length
+    ? room.events.map(e => `<div class="ev ${esc(e.kind || '')}"><span class="ts">${new Date(e.ts).toLocaleTimeString()}</span> ${esc(JSON.stringify(e.data || e))}</div>`).join('')
+    : '<div class="tag">yok (telemetry çekmiş olabilir)</div>';
+
+  $('roomView').innerHTML = h;
+}
+
+// ===========================================================================
+// GALAXY OVERVIEW RENDER (MILESTONE 4)
+// ===========================================================================
+const STAR_PALETTE = ['#9fd8ff', '#bcd4ff', '#ffffff', '#fff3c4', '#ffe08a', '#ffb46b', '#ff6f6f'];
+
+function drawGalaxy() {
+  const cv = $('galaxyCanvas');
+  if (!cv || !galaxyData) return;
+  const g = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const cx = W / 2, cy = H / 2;
+
+  g.fillStyle = '#020208';
+  g.fillRect(0, 0, W, H);
+
+  // Grid
+  g.strokeStyle = '#0a0a18';
+  g.lineWidth = 1;
+  const gridStep = 2000 * galCam.zoom;
+  if (gridStep > 15) {
+    for (let x = ((cx - galCam.x * galCam.zoom) % gridStep); x < W; x += gridStep) {
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+    }
+    for (let y = ((cy - galCam.y * galCam.zoom) % gridStep); y < H; y += gridStep) {
+      g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
+    }
+  }
+
+  // Draw Stars
+  const stars = galaxyData.stars || [];
+  const zoom = galCam.zoom;
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    const sx = cx + (s.x - galCam.x) * zoom;
+    const sy = cy + (s.y - galCam.y) * zoom;
+    if (sx < -10 || sx > W + 10 || sy < -10 || sy > H + 10) continue;
+
+    if (s.a === 'SUPERNOVA') {
+      g.fillStyle = '#ff2222';
+      g.beginPath(); g.arc(sx, sy, 4, 0, 6.2832); g.fill();
+      g.strokeStyle = '#ff8888';
+      g.strokeRect(sx - 5, sy - 5, 10, 10);
+      continue;
+    }
+
+    g.fillStyle = STAR_PALETTE[s.c] || '#fff';
+    const rad = zoom > 0.08 ? (s.p > 4 ? 2.5 : 1.8) : (zoom > 0.04 ? 1.5 : 1.0);
+    g.fillRect(sx, sy, rad, rad);
+
+    if (s.a && zoom > 0.035) {
+      g.strokeStyle = '#ffa500';
+      g.strokeRect(sx - 3, sy - 3, 6, 6);
+    }
+  }
+
+  // Draw Active Rooms & Player Locations
+  const activeRooms = galaxyOverviewData?.activeRooms || [];
+  const roomMap = new Map();
+  for (const r of activeRooms) {
+    roomMap.set(r.starId, r);
+  }
+
+  for (const s of stars) {
+    const r = roomMap.get(s.i);
+    if (!r) continue;
+    const sx = cx + (s.x - galCam.x) * zoom;
+    const sy = cy + (s.y - galCam.y) * zoom;
+
+    // Glowing Pulse
+    g.strokeStyle = '#33ff66';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(sx, sy, 8, 0, 6.2832);
+    g.stroke();
+
+    g.fillStyle = '#33ff66';
+    g.font = '10px monospace';
+    g.fillText(`${s.n} (${r.players}P)`, sx + 10, sy + 3);
+  }
+
+  // Overlay stats
+  g.fillStyle = '#667';
+  g.font = '11px monospace';
+  g.fillText(`Stars: ${stars.length} · Active Rooms: ${activeRooms.length} · Zoom: ${(zoom * 100).toFixed(1)}%`, 10, H - 12);
+}
+
+// Galaxy Canvas Navigation (Pan & Zoom)
+const galCv = $('galaxyCanvas');
+galCv.addEventListener('mousedown', e => {
+  isDraggingGal = true;
+  dragStart = { x: e.clientX, y: e.clientY };
+  camStart = { x: galCam.x, y: galCam.y };
+});
+if (typeof window !== 'undefined') {
+  window.addEventListener('mousemove', e => {
+    if (isDraggingGal) {
+      const dx = (e.clientX - dragStart.x) / galCam.zoom;
+      const dy = (e.clientY - dragStart.y) / galCam.zoom;
+      galCam.x = camStart.x - dx;
+      galCam.y = camStart.y - dy;
+      drawGalaxy();
+    }
+  });
+  window.addEventListener('mouseup', () => { isDraggingGal = false; });
+}
+galCv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.25 : 0.8;
+  galCam.zoom = Math.max(0.01, Math.min(0.5, galCam.zoom * factor));
+  drawGalaxy();
+});
+$('galZoomIn').onclick = () => { galCam.zoom = Math.min(0.5, galCam.zoom * 1.3); drawGalaxy(); };
+$('galZoomOut').onclick = () => { galCam.zoom = Math.max(0.01, galCam.zoom * 0.75); drawGalaxy(); };
+$('galReset').onclick = () => { galCam = { x: 0, y: 0, zoom: 0.030 }; drawGalaxy(); };
+
+// Galaxy Canvas Click -> Select Star / Room
+galCv.addEventListener('click', e => {
+  if (!galaxyData) return;
+  const rect = galCv.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const cx = galCv.width / 2, cy = galCv.height / 2;
+  const wx = galCam.x + (mx - cx) / galCam.zoom;
+  const wy = galCam.y + (my - cy) / galCam.zoom;
+
+  let closest = null, minD = 30 / galCam.zoom;
+  for (const s of galaxyData.stars) {
+    const d = Math.hypot(s.x - wx, s.y - wy);
+    if (d < minD) { minD = d; closest = s; }
+  }
+
+  if (closest) {
+    selectRoom('s' + closest.i);
+  }
+});
+
+// Galaxy Tooltip on Hover
+galCv.addEventListener('mousemove', e => {
+  if (!galaxyData || isDraggingGal) { $('galTooltip').style.display = 'none'; return; }
+  const rect = galCv.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const cx = galCv.width / 2, cy = galCv.height / 2;
+  const wx = galCam.x + (mx - cx) / galCam.zoom;
+  const wy = galCam.y + (my - cy) / galCam.zoom;
+
+  let closest = null, minD = 25 / galCam.zoom;
+  for (const s of galaxyData.stars) {
+    const d = Math.hypot(s.x - wx, s.y - wy);
+    if (d < minD) { minD = d; closest = s; }
+  }
+
+  if (closest) {
+    const tt = $('galTooltip');
+    tt.style.display = 'block';
+    tt.style.left = (mx + 12) + 'px';
+    tt.style.top = (my + 12) + 'px';
+    const activeR = galaxyOverviewData?.activeRooms?.find(r => r.starId === closest.i);
+    tt.innerHTML = `<b>${esc(closest.n)}</b> (ID: ${closest.i})<br>` +
+      `Sınıf: ${closest.k} · Gezegen: ${closest.p} · Kuşak: ${closest.b}<br>` +
+      (closest.a ? `<span style="color:#fa4">Anomali: ${closest.a}</span><br>` : '') +
+      (activeR ? `<span style="color:#3f6">CANLI ODA: ${activeR.players} Oyuncu, ${activeR.rocks} Kaya</span>` : '<span style="color:#777">Oda pasif</span>');
+  } else {
+    $('galTooltip').style.display = 'none';
+  }
+});
+
+// ===========================================================================
+// OYUNCU LİSTESİ & INSPECT
+// ===========================================================================
+function renderPlayers(list) {
+  const host = $('players');
+  $('playerCount').textContent = `(${list.length})`;
+  if (!list.length) { host.textContent = 'oyuncu yok'; return; }
+  host.innerHTML = '';
+  for (const p of list) {
+    const row = document.createElement('div');
+    row.className = 'row' + (p.id === selected ? ' sel' : '');
+    const warn = p.warnings ? ` <span style="color:#f55">!${p.warnings}</span>` : '';
+    const fuel = p.fuel < 5 ? `<span class="low">yakit ${p.fuel}</span>` : `yakit ${p.fuel}`;
+    const cargo = Object.entries(p.cargo || {}).filter(([, n]) => n > 0).map(([o, n]) => `${o}:${n}`).join(' ') || 'bos';
+    row.innerHTML = `<b>${esc(p.callsign)}</b>${warn}<br>` +
+      `<span style="color:#777">${esc(p.room)} · x=${p.x} y=${p.y} · ${fuel} · K/D ${p.kills}/${p.deaths}</span><br>` +
+      `<span style="color:#556">${esc(cargo)}</span>`;
+    row.onclick = () => selectPlayer(p.id);
+    host.appendChild(row);
+  }
+}
+
+function selectPlayer(id) {
+  document.querySelectorAll('#players .row.sel').forEach(r => r.classList.remove('sel'));
+  selected = id;
+  switchTab('stream');
+  startInspect('player', id);
+}
+
+function startInspect(kind, id) {
+  if (inspecting) send({ t: 'adm:uninspect' });
+  inspecting = { kind, id };
+  send({ t: 'adm:inspect', kind, id });
+  $('streamTitle').textContent = `Inspection Stream — ${kind} ${id} (250ms throttle)`;
+}
+
+function updateTargetCard(snap) {
+  if (!snap) {
+    $('targetCard').innerHTML = 'Hedef bilgisi alinamadi.';
+    return;
+  }
+  let h = `<div style="display:flex;justify-content:space-between;align-items:center">` +
+    `<b>HEDEF: [${esc(snap.type?.toUpperCase())}] ${esc(snap.callsign || snap.id || snap.name)}</b>` +
+    `<span class="tag">Room: ${esc(snap.roomId || snap.id || '—')}</span>` +
+    `</div>`;
+  if (snap.type === 'player') {
+    h += `<div style="margin-top:6px;display:flex;gap:12px;font-size:11px">` +
+      `<span>Govde: ${bar(snap.hull, 100, '#ff9a4a')}</span>` +
+      `<span>Kalkan: ${bar(snap.shield, 100, '#7fd4ff')}</span>` +
+      `<span>Yakit: ${bar(snap.fuel, 45, '#8fe0c0')}</span>` +
+      `<span>K/D: ${snap.kills || 0}/${snap.deaths || 0}</span>` +
+      `<span>Uyari: ${snap.speedWarnings || snap.warnings || 0}</span>` +
+      `</div>`;
+  } else if (snap.type === 'room') {
+    h += `<div style="margin-top:6px;font-size:11px;color:#9fe">Oyuncular: ${snap.players} · Kayalar: ${snap.rocks} · Yildiz: ${snap.starId}</div>`;
+  }
+  $('targetCard').innerHTML = h;
+}
+
+// ===========================================================================
+// STREAM & FILTERS
+// ===========================================================================
+function appendEvent(ev) {
+  streamBuffer.push(ev);
+  if (streamBuffer.length > 500) streamBuffer.shift();
+  if (matchesFilter(ev)) {
+    renderEventToDom(ev);
+  }
+}
+
+function matchesFilter(ev) {
+  if (streamFilter !== 'all') {
+    const k = (ev.kind || '').toLowerCase();
+    if (streamFilter === 'combat' && !['shot', 'hit', 'dmg', 'boom', 'death', 'kill', 'npchp', 'stathp'].includes(k)) return false;
+    if (streamFilter === 'movement' && !['mv', 'rockmv', 'pickmv'].includes(k)) return false;
+    if (streamFilter === 'room' && !['join', 'leave', 'warp', 'appear', 'warp_away'].includes(k)) return false;
+    if (streamFilter === 'admin' && !['admin', 'spawn_asteroid', 'star_kill'].includes(k)) return false;
+  }
+  if (streamSearchText) {
+    const str = JSON.stringify(ev).toLowerCase();
+    if (!str.includes(streamSearchText)) return false;
+  }
+  return true;
+}
+
+function renderEventToDom(ev) {
+  const div = document.createElement('div');
+  div.className = 'ev ' + (ev.kind || 'movement');
+  const time = new Date(ev.ts || Date.now()).toLocaleTimeString();
+  div.innerHTML = `<span class="ts">${time}</span> [${ev.kind || 'ev'}] ${esc(JSON.stringify(ev.data || ev))}`;
+  $('stream').appendChild(div);
+  const nearBottom = $('stream').scrollHeight - $('stream').scrollTop < 120;
+  if (nearBottom) $('stream').scrollTop = $('stream').scrollHeight;
+}
+
+function rerenderStream() {
+  $('stream').innerHTML = '';
+  for (const ev of streamBuffer) {
+    if (matchesFilter(ev)) renderEventToDom(ev);
+  }
+}
+
+document.querySelectorAll('.filter-pill').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    streamFilter = btn.dataset.filter;
+    rerenderStream();
+  };
+});
+
+$('streamSearch').oninput = e => {
+  streamSearchText = e.target.value.trim().toLowerCase();
+  rerenderStream();
+};
+
+$('streamPauseBtn').onclick = () => {
+  streamPaused = !streamPaused;
+  $('streamPauseBtn').textContent = streamPaused ? 'Devam Et' : 'Durdur';
+};
+
+$('streamClearBtn').onclick = () => {
+  streamBuffer.length = 0;
+  $('stream').innerHTML = '';
+};
+
+// ===========================================================================
+// STAR NAVIGATOR ACTIONS
+// ===========================================================================
+function navigateToStarInput() {
+  const q = ($('starNavInput')?.value || '').trim();
+  if (!q) return alert('Lütfen bir Yıldız ID veya Adı girin');
+  if (/^s?\d+$/i.test(q)) {
+    const sId = q.replace(/^s/i, '');
+    selectRoom('s' + sId);
+  } else if (galaxyData?.stars) {
+    const s = galaxyData.stars.find(x => x.n.toLowerCase() === q.toLowerCase() || x.n.toLowerCase().includes(q.toLowerCase()));
+    if (s) {
+      selectRoom('s' + s.i);
+    } else {
+      alert(`"${q}" isimli yıldız bulunamadı.`);
+    }
+  } else {
+    selectRoom('s' + q);
+  }
+}
+
+$('starNavBtn').onclick = navigateToStarInput;
+$('starNavInput').addEventListener('keydown', e => e.key === 'Enter' && navigateToStarInput());
+$('navHomeBtn').onclick = () => selectRoom('s6063');
+$('navStationBtn').onclick = () => selectRoom('s7071');
+$('navStation2Btn').onclick = () => selectRoom('s10069');
+
+// ===========================================================================
+// GOD MODE ACTIONS
+// ===========================================================================
+$('killBtn').onclick = () => {
+  if (!selected) return alert('Önce oyuncu seç');
+  if (!confirm(`${selected} oyuncusu öldürülsün? (telemetry.critical ile loglanacak)`)) return;
+  send({ t: 'adm:command', op: 'kill_player', args: { id: selected } });
+  appendEvent({ ts: Date.now(), kind: 'admin', targetId: selected, data: 'CMD kill_player gönderildi' });
+};
+
+$('spawnRockBtn').onclick = () => {
+  const roomId = $('spawnRoom').value.trim() || selectedRoom;
+  if (!roomId) return alert('Oda kimliği (Room ID) girin (örn. s0)');
+  const ore = $('spawnOre').value;
+  const size = Number($('spawnSize').value || 24);
+  send({ t: 'adm:command', op: 'spawn_asteroid', args: { roomId, ore, size } });
+  appendEvent({ ts: Date.now(), kind: 'admin', targetId: roomId, data: `CMD spawn_asteroid ${roomId} (ore=${ore||'rnd'}, size=${size})` });
+};
+
+$('starKillBtn').onclick = () => {
+  const starId = $('starKillId').value.trim();
+  if (starId === '') return alert('Star ID girin (örn. 0)');
+  if (!confirm(`DİKKAT: Yıldız #${starId} yok edilecek (SUPERNOVA tetiklenecek)! Onaylıyor musunuz?`)) return;
+  send({ t: 'adm:command', op: 'trigger_star_kill', args: { starId: Number(starId) } });
+  appendEvent({ ts: Date.now(), kind: 'admin', targetId: 'star_' + starId, data: `CMD trigger_star_kill starId=${starId}` });
+};
+
+$('refreshBtn').onclick = refreshAll;
+
+function setUI(on) {
+  $('killBtn').disabled = !on;
+  $('spawnRockBtn').disabled = !on;
+  $('starKillBtn').disabled = !on;
+  $('refreshBtn').disabled = !on;
+}
+</script>
+</body>
+</html>

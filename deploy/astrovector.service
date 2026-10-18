@@ -1,0 +1,37 @@
+# AI'A NOT: Docker KULLANMAYAN kurulum için systemd birimi (ör. Oracle Ampere A1 VM'de
+# doğrudan node ile çalıştırmak). Docker tercih edilirse bu dosya GEREKMEZ.
+#
+# Kurulum:
+#   sudo useradd -r -s /usr/sbin/nologin astrovector
+#   sudo mkdir -p /opt/astrovector && sudo chown -R astrovector: /opt/astrovector
+#   # kodu /opt/astrovector'a kopyala (rsync/git), sonra:
+#   cd /opt/astrovector && sudo -u astrovector npm ci --omit=dev
+#   sudo cp deploy/astrovector.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now astrovector
+#   systemctl status astrovector --no-pager        # (SURUM ...) satırını görmelisin
+[Unit]
+Description=AstroVector oyun sunucusu (WebSocket + statik istemci)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=astrovector
+Group=astrovector
+WorkingDirectory=/opt/astrovector
+# Sırlar bu dosyada: ADMIN_SECRET_KEY (repoya GİRMEZ), PORT_GAME/PORT_ADMIN, ADMIN_BIND.
+EnvironmentFile=/opt/astrovector/.env.production
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node backend/server.js
+Restart=always
+RestartSec=3
+# Sertleştirme: sunucu yalnız kendi dizinine yazar.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/astrovector
+# Loglar journald'e gider: journalctl -u astrovector -f
+
+[Install]
+WantedBy=multi-user.target
