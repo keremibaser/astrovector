@@ -22,10 +22,12 @@
     "test-m4": "node backend/scripts/test-milestone4.mjs",
     "test-anomaly": "node backend/scripts/test-anomaly.mjs",
     "smoke": "node backend/scripts/ws-smoke.mjs",
-    "test-all": "npm run test-bat && npm run test-i18n && npm run test-admin && npm run test-m4 && npm run test-anomaly && npm run test-warp && npm run test-combat && npm run test-fuel && npm run test-craft-boost && npm run test-pirates && npm run test-chat"
+    "test-store": "node backend/scripts/test-store.mjs",
+    "test-all": "node backend/scripts/run-all.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
+    "pg": "^8.23.1",
     "ws": "^8.18.0"
   }
 }

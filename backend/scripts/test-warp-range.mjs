@@ -2,10 +2,50 @@
 // isteği kabul ettiğini bağımsız bir ws istemcisiyle kanıtlar. Tarayıcıya gerek yok.
 // Ayrıca sn paketindeki jumpRange alanının geldiğini doğrular (client menzili oradan alır).
 import WebSocket from 'ws';
+import { spawn } from 'node:child_process';
+import { createConnection } from 'node:net';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { galaxy } from '../src/galaxy.js';
 
+// AI'A NOT (PAKET BAĞIMSIZLIĞI — düzeltilen gizli bağımlılık): Bu test ÖNCEDEN dışarıdan çalışan bir
+// sunucuya (`ws://localhost:8081`) bağlanıyordu. Yani `npm run test-all` yalnızca geliştiricinin dev
+// sunucusu AYAKTAYKEN geçiyordu; sunucu kapatılınca `ECONNREFUSED ::1:8081` ile kırıldı (yaşandı).
+// Yeni davranış: 8081 dinliyorsa onu kullanır (dev akışı bozulmaz), dinlemiyorsa KENDİ sunucusunu
+// ayrı portlarda (8097/8098) kaldırır ve test bitince kapatır → paket kendi kendine yeter.
+const SELF_PORT = 8097;
+const base = 'ws://127.0.0.1:';
+const probe = (port) => new Promise((ok) => {
+  const s = createConnection({ host: '127.0.0.1', port }, () => { s.destroy(); ok(true); });
+  s.on('error', () => ok(false));
+  s.setTimeout(700, () => { s.destroy(); ok(false); });
+});
+
+let srv = null;
+const url = (await probe(8081)) ? base + 8081 : base + SELF_PORT;
+if (!url.endsWith('8081')) {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  // PORT_GAME env'i .env'deki değeri EZER (dotenv var olanı üzerine yazmaz — bkz. Tuzak 62b).
+  srv = spawn(process.execPath, [resolve(root, 'backend/server.js')], {
+    env: {
+      ...process.env,
+      PORT_GAME: String(SELF_PORT),
+      PORT_ADMIN: '8098',
+      ADMIN_SECRET_KEY: 'warp_test_' + Math.random().toString(36).slice(2, 8),
+    },
+    stdio: 'ignore',
+  });
+  const t0 = Date.now();
+  while (Date.now() - t0 < 15000 && !(await probe(SELF_PORT))) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (!(await probe(SELF_PORT))) { console.log('KENDI SUNUCUSU ACILAMADI'); srv.kill(); process.exit(3); }
+  console.log(`kendi sunucusu kaldirildi: ${url}`);
+}
+process.on('exit', () => { if (srv) { try { srv.kill(); } catch { /* zaten ölmüş */ } } });
+
 const g = galaxy();
-const ws = new WebSocket('ws://localhost:8081');
+const ws = new WebSocket(url);
 const got = [];
 let roomId = null, homeId = null, jumpRange = null, phase = 0;
 

@@ -8,8 +8,10 @@
 // NEDEN ÖNEMLİ: 1000 oyuncu * 10 eylem/sn = 10K insert/sn → Postgres ölür.
 // Batch'lenince: 10K insert/sn, 5 sn'de bir 1000'lik 20 sorguya iner → DB nefes alır.
 //
-// NOT: Şu an flush console.log yapar. Milestone 3'te Supabase client bağlanınca
-//       gerçek INSERT'e dönüşecek — flush() içi tek değişecek, kuyruk mimarisi aynı kalır.
+// NOT (M3a GÜNCEL): flush artık GERÇEK kalıcı depoya yazıyor. Kuyruk mimarisi aynı kaldı:
+//       record() hâlâ tick'ten çağrılabilen tek metod ve saf senkron push; gerçek yazım
+//       store.flushOnce() içinde (kendi 5 sn'lik zamanlayıcısı) olur.
+//       Depo yoksa (bağlanmadıysa) eski davranış: console'a loglanır.
 
 const MAX_QUEUE = 1000;
 const FLUSH_THRESHOLD = 200;
@@ -18,7 +20,11 @@ export class Telemetry {
   constructor() {
     this.queue = [];
     this.dropped = 0; // kuyruk taşınca atılan event sayısı (admin dashboard'a raporlanır)
+    this.store = null; // M3a: kalıcı depo (server.js bağlar)
   }
+
+  // Kalıcı depoyu bağla. Bağlanmazsa telemetry console'a yazar (yerel hızlı koşumlar).
+  useStore(store) { this.store = store; }
 
   // AI'A NOT: record — OYUN LOOP'UNDAN ÇAĞRILABİLECEK TEK METOD ve saf sync push (<1µs).
   // Asla await/IO içermez; gerçek DB yazımı yalnız flush'ta, timer'ın kendi çağrısında olur.
@@ -38,8 +44,9 @@ export class Telemetry {
   //   flush hemen başlar ama fire-and-forget; hata sadece loglanır, oyun devam eder.
   critical(kind, playerId, data = {}) {
     const item = { kind, playerId, data, ts: Date.now(), critical: true };
-    // Milestone 3: Supabase'e direkt insert (async, catch'li). Şimdilik console.
+    // Yerelde görünürlük şart: kritik event her modda console'a da düşer.
     console.log(`[TELEMETRY-CRITICAL]`, item);
+    if (this.store) this.store.queueTelemetry([item]); // `critical:true` DB'de ayrı sorgulanır
   }
 
   // AI'A NOT: flush — snapshot al, kuyruğu temizle, sonra yaz. Yazma sırasında yeni
@@ -54,14 +61,25 @@ export class Telemetry {
   // Şu an mock: sadece sayar. YAZMA HATASI OLURSA batch kuyruğa GERİ konmaz (sonsuz loop riski);
   // kayıp kabul edilir + dropped sayacı artar — admin dashboard'da görülür.
   _write(batch) {
-    // TODO Milestone 3: gerçek Supabase INSERT buraya.
+    // M3a: kalıcı depo bağlıysa ona devret — bu metodun kendisi I/O YAPMAZ (tick içinden
+    // çağrılan flush() tick'i bloklamamalı). Gerçek yazım store.flushOnce() içinde olur.
+    if (this.store) {
+      this.store.queueTelemetry(batch);
+      console.log(`[TELEMETRY] ${batch.length} events -> store (mod ${this.store.mode}; dropped ${this.dropped})`);
+      return;
+    }
     console.log(`[TELEMETRY] flushing ${batch.length} events (dropped total: ${this.dropped})`);
   }
 
-  // Graceful shutdown için senkron boşaltım (async DB'ye yazılamıyorsa log'a düşer).
+  // Graceful shutdown için senkron boşaltım. Kuyruk depoya devredilir; gerçek yazımı
+  // server.js'teki `await store.close()` yapar (SIGTERM handler'ı senkron kalmak zorunda).
   flushSync() {
     const batch = this.queue.splice(0, this.queue.length);
+    if (this.store) {
+      this.store.queueTelemetry(batch);
+      console.log(`[TELEMETRY-SHUTDOWN] ${batch.length} events -> store (kapanista yazilacak)`);
+      return;
+    }
     console.log(`[TELEMETRY-SHUTDOWN] ${batch.length} events discarded to log`);
-    // TODO Milestone 3: burada await supabase insert (shutdown handler await'lenebilir yapılacak).
   }
 }

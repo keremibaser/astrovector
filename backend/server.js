@@ -23,7 +23,8 @@ import { RoomManager } from './src/rooms.js';
 import { Telemetry } from './src/telemetry.js';
 import { EventBus } from './src/eventbus.js';
 import { MSG, ADMIN_MSG } from './src/protocol.js';
-import { galaxy, GALAXY_SEED } from './src/galaxy.js';
+import { galaxy, GALAXY_SEED, setDestroyedSink, seedDestroyedStars } from './src/galaxy.js';
+import { Store } from './src/store.js';
 
 // ---------------------------------------------------------------------------
 // CONFIG
@@ -35,7 +36,7 @@ const PORT_GAME = Number(process.env.PORT_GAME || process.env.PORT || 8081);
 // cevaplanmalı — eski süreç portu tutarken yeni süreç düşerse (EADDRINUSE) yeni kod HİÇ devreye
 // girmez ve bu kullanıcı için görünmez olur (yaşandı). Konsolda bu damga + istemcideki SURUM
 // eşleşmiyorsa iki taraf farklı sürümdedir.
-const SURUM = '2026-10-18k-M5b';
+const SURUM = '2026-10-18l-M3a';
 const PORT_ADMIN = Number(process.env.PORT_ADMIN || 8090);
 // AI'A NOT (M5b — PaaS/ücretsiz barındırma): ADMIN_SECRET_KEY .env'de olur ve ASLA repoya girmez.
 // Bulut platformlarında (Back4App/Render/Cloud Run) `.env` YOKTUR. Eskiden burada `throw` vardı:
@@ -73,6 +74,25 @@ const MAX_ADMIN_STREAMS = 3;
 const rooms = new RoomManager();
 const telemetry = new Telemetry();
 const eventBus = new EventBus(500); // son 500 event tutulur (ring buffer)
+
+// ---------------------------------------------------------------------------
+// M3a — KALICI DEPO (kalıcılığın TEK kapısı; bkz. src/store.js)
+// ---------------------------------------------------------------------------
+// NEDEN: bulut platformlarında dosya sistemi GEÇİCİ ("… lost every time the service redeploys,
+// restarts, or spins down") → dosyaya yazan kalıcılık yayında sessizce kaybolur. Kalıcı veri
+// ya DATABASE_URL'li bir Postgres'e (Render Postgres/Supabase — ikisi de Postgres, kod aynı)
+// ya da (yerelde) bugünkü dosyaya gider.
+// SÖZLEŞME: `await` yalnız BURADA (açılış) var; oyun loop'u yalnız kuyruk fonksiyonlarını görür.
+// DB bağlanamazsa süreç ÖLMEZ: dosya moduna düşer + yüksek sesle uyarır (M5b felsefesi).
+const store = new Store();
+await store.init();
+telemetry.useStore(store);
+setDestroyedSink((id) => store.queueDestroyedStar(id)); // tick içindeki writeFileSync KALDIRILDI
+if (store.mode === 'pg') seedDestroyedStars(await store.loadDestroyedStars());
+store.startAutoFlush(5000);
+console.log(`[STORE] mod=${store.mode} — ${store.mode === 'pg'
+  ? 'kalici veri Postgres (yeniden baslatmada/soguk baslangicta KORUNUR)'
+  : 'kalici veri YEREL DOSYA (bulutta yeniden baslatmada KAYBOLUR)'}`);
 
 // Basit IP blacklist — üretimde LRU map'e çevrilir.
 const blacklist = new Map(); // ip -> unbanTimestamp
@@ -137,6 +157,23 @@ setInterval(() => telemetry.flush(), 5000);
 let starmapCache = null;
 let starmapVersion = null;
 const gameHttp = createServer(async (req, res) => {
+  // M3a: TEŞHİS UCU — "kalıcı veri gerçekten DB'ye mi gidiyor?" sorusu uzaktan, sır paylaşmadan
+  // cevaplanabilsin (soğuk başlangıçtan sonra mod=pg kalıyorsa kalıcılık gerçekten kalıcıdır).
+  if (req.url && req.url.split('?')[0] === '/healthz') {
+    const body = JSON.stringify({
+      ok: true,
+      surum: SURUM,
+      seed: GALAXY_SEED,
+      rooms: rooms.activeRooms().length,
+      store: store.stats(),
+    });
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+    });
+    return res.end(body);
+  }
   if (req.url && req.url.startsWith('/starmap.json')) {
     if (!starmapCache) {
       // byId Map'i JSON'a girmesin diye replacer: Map'ler zaten {} olur, açıkça düşürüyoruz.
@@ -383,7 +420,11 @@ process.on('SIGTERM', gracefulShutdown); // Docker/systemd SIGTERM gönderir, SI
 function gracefulShutdown() {
   console.log('Shutting down; flushing telemetry...');
   telemetry.flushSync();
-  process.exit(0);
+  // M3a: kapanışta kuyruk GERÇEKTEN yazılsın (aksi hâlde son 5 sn'lik telemetry + yıldız kaydı
+  // yeniden başlatmada kaybolurdu). Handler senkron kalmak zorunda → çıkışı close() bekler.
+  store.close()
+    .catch((err) => console.error('[STORE] kapanis hatasi:', err.message))
+    .finally(() => process.exit(0));
 }
 
 // ===========================================================================

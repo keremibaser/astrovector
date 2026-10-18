@@ -36,6 +36,11 @@ export function loadDestroyedStars() {
 }
 
 export function saveDestroyedStar(starId) {
+  // AI'A NOT (M3a — SÖZLEŞME İHLALİ DÜZELTİLDİ): bu fonksiyon room tick'inin İÇİNDEN çağrılıyor
+  // (rooms.js: süpernova) ve eskiden burada `writeFileSync` vardı = tick içinde disk I/O.
+  // Performans sözleşmesi: tick'te I/O YOK. Artık kalıcı yazım KALICI DEPO'nun kuyruğuna bırakılır
+  // (store.queueDestroyedStar, senkron ve I/O'suz); gerçek yazım deponun kendi zamanlayıcısında olur.
+  if (_sink) { _sink(Number(starId)); return; }
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
     const current = loadDestroyedStars();
@@ -43,6 +48,23 @@ export function saveDestroyedStar(starId) {
     writeFileSync(DESTROYED_FILE, JSON.stringify([...current]), 'utf8');
   } catch (err) {
     console.error('[GALAXY] destroyed_stars.json yazilamadi:', err.message);
+  }
+}
+
+// Kalıcı depo bağlanınca (server.js) buraya `id => store.queueDestroyedStar(id)` takılır.
+let _sink = null;
+export function setDestroyedSink(fn) { _sink = fn; }
+
+// Bulutta dünyanın yıkım kaydı DB'den gelir (dosya geçici olduğu için OKUNAMAZ).
+// `galaxy()` lazy olduğundan tohum, ilk erişimden ÖNCE verilirse dosya hiç okunmaz.
+let _seed = null;
+export function seedDestroyedStars(ids) {
+  _seed = new Set([...ids].map(Number));
+  if (_cache) {   // harita zaten kurulmuşsa tohumu hemen uygula
+    for (const id of _seed) {
+      const star = _cache.byId.get(id);
+      if (star) star.a = 'SUPERNOVA';
+    }
   }
 }
 
@@ -123,7 +145,7 @@ export function galaxy() {
   if (!_cache) {
     _cache = generateGalaxy();
     _cache.byId = new Map(_cache.stars.map(s => [s.i, s]));
-    const destroyed = loadDestroyedStars();
+    const destroyed = _seed || loadDestroyedStars();
     for (const id of destroyed) {
       const star = _cache.byId.get(id);
       if (star) star.a = 'SUPERNOVA';

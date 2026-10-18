@@ -40,3 +40,21 @@ services:
         value: 0.0.0.0
       - key: ADMIN_BIND
         value: 127.0.0.1
+      # M3a KALICILIK: kalıcı veri (yıldız yıkımı + telemetry) bu Postgres'e gider.
+      # NEDEN BÖYLE: Render'ın ücretsiz servisinde dosya sistemi GEÇİCİ ("… lost every time the
+      # service redeploys, restarts, or spins down"); yerel SQLite/dosya bulutta sessizce kaybolur.
+      # `fromDatabase` = bağlantı dizesi ELLE KOPYALANMAZ, platform enjekte eder → buluta hiçbir
+      # sır girmiyor (ADMIN_SECRET_KEY için verdiğimiz kararın aynısı).
+      # NOT: Ücretsiz Render Postgres oluşturulduktan 30 GÜN SONRA sona erer (veri gider, plan
+      # yeniden oluşturulur); süre dolsa bile OYUN ÇALIŞIR: store.js bağlanamazsa dosya moduna
+      # düşer ve /healthz'te görünür.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: astrovector-db
+          property: connectionString
+
+# Kalıcı veritabanı (Blueprint'in parçası: panelde elle veritabanı oluşturmaya gerek yok).
+databases:
+  - name: astrovector-db
+    plan: free
+    region: frankfurt

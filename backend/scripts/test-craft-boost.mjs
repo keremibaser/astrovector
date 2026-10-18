@@ -18,7 +18,8 @@ import WebSocket from 'ws';
 import { galaxy } from '../src/galaxy.js';
 
 const g = galaxy();
-const ws = new WebSocket('ws://localhost:8081');
+const URL = process.env.WS_URL || 'ws://localhost:8081';   // WS_URL ile başka bir örneğe yönlendirilebilir
+const ws = new WebSocket(URL);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const send = (o) => ws.send(JSON.stringify(o));
 
@@ -116,7 +117,7 @@ async function mineOre(ore, need, budgetMs = 60_000) {
 
 // M2h: ikinci bağlantı (B) — yalnız BOOST yakıt ölçümü için, TAZE oyuncu.
 const B = { ws: null, my: { x: 0, y: 0 }, cargo: {}, sn: null, you: null };
-B.ws = new WebSocket('ws://localhost:8081');
+B.ws = new WebSocket(URL);
 B.ws.on('message', (raw) => {
   const m = JSON.parse(raw);
   if (m.t === 'sn') { B.sn = m; B.you = m.you; if (m.cargo) B.cargo = { ...m.cargo }; }

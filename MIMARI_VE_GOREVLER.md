@@ -382,6 +382,47 @@ yeri olsun orada, ses ayarı da olsun kaydırmalı"*.
 metni gönderirken `code` + `p` ver. Bitmap font ASCII'dir: Türkçe karakterler `trAscii` ile
 sadeleşir (İ→I, Ş→S, Ğ→G, Ü→U, Ö→O, Ç→C).
 
+### M3a — KALICI DEPO: TEK ARAYÜZ, İKİ MOD (Postgres / dosya) ✅ (2026-10-18)
+
+**Karar (ajan, kullanıcı "sen karar ver, en az uğraştıran olsun" dedi):** kalıcılık **`store.js`** adlı
+tek bir katmandan geçer; mod **ortama göre kendiliğinden** seçilir:
+`DATABASE_URL` varsa **Postgres**, yoksa **dosya** (bugünkü yerel davranış). Buluta **hiçbir sır
+elle girilmez**: Render Blueprint'i (`render.yaml`) veritabanını kendisi kurar ve bağlantı dizesini
+`fromDatabase` ile enjekte eder → panelde kopyala-yapıştır yok (M5b'deki ADMIN_SECRET_KEY kararının
+aynısı). Supabase de Postgres olduğu için **sağlayıcı değişse kod değişmez**, yalnız `DATABASE_URL`
+değişir → seçim ertelenebilir ve geri dönülebilir.
+
+**NEDEN dosya/SQLite "kalıcılık" OLARAK SEÇİLMEDİ (ölçülmüş gerçek):** Render ücretsiz servisinde
+dosya sistemi **geçicidir** — resmî belge: *"any changes to your web service's filesystem (uploaded
+images, local SQLite databases, etc.) are lost every time the service redeploys, restarts, or spins
+down"* ve *"Paid services can preserve local filesystem changes by attaching a persistent disk, but
+Free web services cannot."* Yani yerel SQLite bulutta **testte çalışır, yayında kaybolur** — en kötü
+hata sınıfı. Ücretsiz Render Postgres'in bedeli: **30 gün sonra sona erer**.
+
+**Kabuller (hepsi testle sabitlendi — `npm run test-store`, 35/35):**
+| Sözleşme | Neden |
+|---|---|
+| Oyun loop'u yalnız `queueDestroyedStar` / `queueTelemetry` görür (senkron, I/O yok) | Performans sözleşmesi: tick'te I/O yok. Gerçek yazım `flushOnce()`, kendi 5 sn'lik zamanlayıcısında |
+| Yıldız yazımı TEK sorgu: `INSERT … SELECT unnest($1::int[]) ON CONFLICT (star_id) DO NOTHING` | Aynı yıldız iki kez yazılmaz; 1 sorgu = N kayıt |
+| Telemetry TEK multi-INSERT (5 parametre × N satır) | `telemetry.js` batch mimarisi korunur: 1000 event = 1 sorgu |
+| Yazma hatasında **telemetry hemen düşülür**, **yıldız 1 kez daha denenir**, 2. ardışık hatada düşülür | Sonsuz yeniden deneme yok; ama dünya durumu telemetriden değerlidir → geçici kesinti kurtulur |
+| DB bağlanamazsa **mod dosyaya düşer, süreç ölmez**, yüksek sesle uyarır | Ömrü dolmuş DB (30 gün) veya yanlış dize oyunu DÜŞÜRMEMELİ (M5b felsefesi) |
+| `GET /healthz` → `{surum, store:{mode, written, failed, lastError}}` | "Kalıcı veri gerçekten DB'ye mi gidiyor" sorusu **uzaktan ve sırsız** cevaplanır |
+
+**Ayrıca düzeltilen gizli ihlal:** `saveDestroyedStar()` çalışan kodda room tick'inin İÇİNDEN
+`writeFileSync` çağırıyordu (süpernovada) = **tick içinde disk I/O** → performans sözleşmesi ihlali
+(bkz. Tuzak 66). Artık kalıcı yazım kuyruğa girer; tick yalnız `Map.set` yapar.
+
+**KANIT (ölçüldü, 2026-10-18):**
+- `npm run test-store` → **35/35** (sorgu metni + parametreler + retry politikası + dayanıklılık + dosya modu).
+- Tam paket `npm run test-all` → **12/12 suite geçti** (yeni koşucu `run-all.mjs` sonuç tablosu basar).
+- Uçtan uca, ayrı portlarda (8101/8102) kendi test anahtarıyla: admin komutu → `telemetry.critical` →
+  kuyruk → otomatik flush → `backend/data/telemetry.ndjson`'a satır yazıldı ✓ ve `GET /healthz`
+  sonrası `store.written.telemetry: 1`, `mode: "file"`, `surum: "2026-10-18l-M3a"` ✓.
+- **Yayın kanıtı (BEKLİYOR):** Render Blueprint senkronu sonrası `/healthz` → `store.mode: "pg"`; soğuk
+  başlangıçtan sonra `written` sayaçları ARTMAYA DEVAM EDİYORSA kalıcılık gerçekten kalıcıdır (süreç
+  yeniden doğduğunda veri DB'den geri gelir — dosya modunda bu imkânsızdı).
+
 ### M3b — ENVANTER + ZANAAT BİRLEŞTİ (kullanıcı isteği, 2026-10-18) ✅ TAMAM
 Kontroller günceli: **C = ENVANTER/ZANAAT paneli** (birleşik), **H/G/J = eşya kullan** (panel
 satırına tıklamak da aynı işi yapar), HUD'da yalnız `WARP HUCRESI n` yazar.
@@ -539,6 +580,9 @@ dönüşüm oranını BEN ekledim. Üstelik testi de bu uydurma kurala göre yaz
 | **Tuzak 61** | **"Yazılmış kod" ≠ "bağlı kod".** M4 anomali handler'ları (`handleSolveAnomaly`, ödül, i18n) BAŞTAN BERİ vardı; ama `room.anomaly` hiç oluşturulmuyordu, `solve_anom` dispatcher'a bağlı değildi, istemcide çizim/tuş yoktu → özellik **ölü koddu** ve SSOT "M4 ✅ TAMAM" diyordu. Bir özelliği "var" saymadan önce **dört katmanın hepsini** ara: (1) veri nesnesi üretiliyor mu, (2) mesaj dispatcher'da bağlı mı, (3) istemci gösteriyor mu, (4) uçtan uca TEST ölçüyor mu. Ayrıca `rayPick` hedef listesine eklenmeyen nesne "vurulmaz" (silent) kalır. |
 | **Tuzak 62** | **Platformlar Dockerfile'ı KÖKTE arar + imajdaki sabit port "ölü servis" üretir.** `deploy/Dockerfile` içinde `ENV PORT_GAME=8081` SABİTTİ; ama Back4App/Render/Cloud Run gibi platformlar `$PORT` env'i VERİR ve trafiği O porta yönlendirir → uygulama 8081'de dinlerken edge başka porta bakar: servis "ayakta ama erişilemez" olur (loglarda hata YOK). Düzeltme: imajda `PORT_GAME` **ENV'i yok** (sunucu `PORT_GAME \|\| PORT \|\| 8081` izler), HEALTHCHECK de `${PORT_GAME:-${PORT:-8081}}` kullanır, ve **tek gerçek Dockerfile köktedir** (`deploy/Dockerfile` yalnız işaretçi) — iki kopya "biri güncellenir, diğeri unutulur" sürüklenmesi üretir. Ölçüm: `PORT=10000 sh -c 'echo ${PORT_GAME:-${PORT:-8081}}'` → `10000`; `PORT_GAME=8081` verilince → `8081`. |
 | **Tuzak 63b** | **"Container uyumaz" ≠ "servis 7/24 yaşar" — ÖMÜR ayrı bir eksendir ve ücretsiz planlarda genelde 1 saattir.** Back4App seçilirken "container'ı uyutmaz" ifadesi gerekçe yapıldı; oysa Back4App'in KENDİ belgesi (blog, Eyl 2026) şöyle diyor: *"On the free plan the URL and the container live 60 minutes from the moment the deploy starts — and a six-minute build eats six of them"* ve *"The free-plan subdomain is a preview: … an `expiresAt` timestamp exactly 60 minutes out. That is a sharing window, not hosting — a permanent subdomain or your own domain needs a paid plan."* Yani **uyumamak ile yaşamak farklı iddialardır**: bir servis boşta uyumayıp yine de 60 dk sonra ÖLEBİLİR ve link her deploy'da DEĞİŞİR. Bir barındırma adayı değerlendirilirken artık **beş eksen** sorulur: (1) uyuma davranışı, (2) **ömür/expiry**, (3) **adres kalıcılığı**, (4) kart, (5) çıkış trafiği + WebSocket. Ölçüm: `?probe=1` canlı yayında `harita=16384 sunucuHarita=16384`, `hata=yok`; ömür testi yoklayıcıyla (`b4a-omur-olc.sh`, 60 sn'de bir) kaydediliyor. |
+| **Tuzak 67** | **Test paketi, kendisinin kurmadığı bir kaynağa BAĞLANMAMALIDIR.** `test-all` altı suite'i `&&` ile zincirliyordu; bunların 5'i (`test-combat/fuel/craft-boost/pirates/chat`) `ws://localhost:8081`'e bağlanıyordu — yani **"tüm testler geçti" sonucu yalnız geliştiricinin dev sunucusu AYAKTAYKEN doğruydu**. Dev sunucusu kapatılınca paket `AggregateError [ECONNREFUSED] ::1:8081` ile yarıda koptu ve arıza **kendi değişikliğimizin** sonucu sanıldı (yanlış teşhis riski). Kural: her suite gereken kaynağı (sunucu, port, dosya) kendi kaldırmalı ya da koşucu ortak kaynağı kurup adresi (`WS_URL`) devretmeli → `run-all.mjs` bunu yapar ve **sonuç tablosu** basar. Yan kazanç: kırık suite listesi tek bakışta görünür. |
+| **Tuzak 66** | **Tick içinde GİZLİ I/O: `saveDestroyedStar`.** Süpernova anında (rooms.js) doğrudan `writeFileSync` çağrılıyordu = oyun loop'unun içinde disk yazımı; performans sözleşmesi ("tick'te I/O yok") yıllarca yazılı olduğu hâlde **dosya katmanında ihlal ediliyordu** — çünkü ihlal oyun kodunda değil, yardımcı fonksiyonun içinde saklıydı. Kural: sözleşmeyi "tick dosyasında grep" ile değil, **tick'ten erişilebilen tüm fonksiyonların yan etkilerini** izleyerek doğrula. Düzeltme: kalıcı yazım kalıcı depo kuyruğuna girer (`store.queueDestroyedStar`, senkron `Map.set`). |
+| **Tuzak 65** | **"Dosyaya yazdım" bulutta KALICILIK değildir.** Render ücretsiz servis: *"any changes to your web service's filesystem (uploaded images, **local SQLite databases**, etc.) are lost every time the service redeploys, restarts, or spins down"* + *"Free web services cannot"* attach a persistent disk. Yani yerel SQLite/dosya **testte çalışır, yayında kaybolur** — en tehlikeli hata sınıfı (sessiz veri kaybı). Kalıcılık iddiası ancak **dış bir servis** (Postgres vb.) ile kurulur; seçim yapılırken "veri nerede duruyor ve yeniden başlatmada ne oluyor" sorusu ÖMÜR kadar kritiktir. Ölçüm: `store.js` iki modda aynı arayüz (test `35/35`), `/healthz` modu yayınlar. |
 | **Tuzak 64** | **Render Blueprint'in `branch` varsayılanı `master`'dır.** `render.yaml` içinde `branch` yazılmazsa Render deponun `master` dalını arar; bizim depo `main` olduğu için **deploy hiç başlamaz** (üstelik hata mesajı "şu dal yok" kadar net olmayabilir). Kural: Blueprint'te dalı **açıkça** yaz ve her platformda "varsayılan dal" varsayımını doğrula (GitHub 2020'den beri `main` üretiyor, araçların bir kısmı hâlâ `master` bekliyor). |
 | **Tuzak 63** | **"Ücretsiz barındırma" 2026'da ölçülmeden varsayılmaz.** Taze durum (2026-10): HF Spaces Temmuz 2026'dan beri Docker/Gradio Space'lerde **ücretli plan** istiyor; Koyeb Şubat 2026'dan beri **kart zorunlu** + boşta uyuyor ve uyanan WebSocket "birkaç dakika" yaşıyor; Fly.io/Heroku/Glitch ücretsiz katmanı **bitti**; Railway free ayda **$1 kredi** (7/24 çevirmez); Render kart istemiyor ama boşta **15 dk sonra uyur** (750 saat/ay + 5 GB bant, uyanma ~1 dk); Northflank **uyumaz** ama kart doğrulaması ister; Oracle Always Free 4/24 → **2 OCPU/12 GB** (Haziran 2026) ve kart ister; Cloudflare Quick Tunnel kart/hesap istemez ve WebSocket çalışır (SSE çalışmaz) ama **PC açık kalmalı** ve URL her açılışta değişir. Kural: "bedava + kart yok + 7/24 + WebSocket" dördü birden nadir — her adayı **uyuma davranışı, kart, çıkış trafiği, WebSocket** ekseninde ölç, sonra karar ver. |
 | **Tuzak 62b** | **Yerel `.env`, `PORT` taklidini SESSİZCE bastırır.** `PORT=18080 node backend/server.js` denendi → sunucu yine **8081**'i denedi ve "Port 8081 DOLU" ile düştü; sebep: `.env` içinde `PORT_GAME=8081` yazıyor (bkz. `.env.example`) ve dotenv onu yükleyince `PORT_GAME \|\| PORT \|\| 8081` zincirinde **PORT_GAME kazanır**. Platformda `.env` YOK → yayında `PORT` kazanır (istenen bu), ama **yerelde platform senaryosunu taklit ederken `PORT_GAME=` (boş) geçmek zorunlu**: `PORT=18080 PORT_GAME= PORT_ADMIN=18090 node backend/server.js`. Ölçülen kanıt (2026-10-18): bu çağrı → HTTP `/` **200**, oyun `0.0.0.0:18080`, admin `127.0.0.1:18090`, ve `WS_URL=ws://127.0.0.1:18080 node backend/scripts/ws-smoke.mjs` → **BAŞARILI** (`sn` 7 ms'de, `jumpRange=700`, `recipes=4`, `items=4`). Yani "$PORT'u destekliyoruz" iddiası kabuk genişletmesiyle değil, **gerçek soket akışıyla** kanıtlanır. |
@@ -1133,6 +1177,8 @@ yazısı) — sessiz bir boş ekran hata raporu üretir.
 | `npm run genmap` | `game-client/starmap.json` üretir (seed'li, deterministik, 16384 yıldız) |
 | `node backend/scripts/admin-peek.mjs` | Sunucudaki oyuncuların canlı pozisyon/durum listesi |
 | `node backend/scripts/admin-inspect.mjs` | Tek oyuncunun tam durumu + son `mv` paketi yaşı (ağ teşhisi) |
+| `npm run test-all` | **PAKET KOŞUCUSU (`run-all.mjs`):** paylaşılan test sunucusunu kendi portlarında kaldırır (8099/8100), sunucuya ihtiyaç duyan suite'lere `WS_URL` devreder, 12 suite'i **SERİ** koşar, sunucuyu kapatır ve sonuç tablosu basar — "tüm testler geçti" artık **dev sunucusunun ayakta olmasına bağlı DEĞİL** (bkz. Tuzak 67) — **12/12** |
+| `npm run test-store` | **M3a KALICI DEPO SÖZLEŞMESİ (veritabanı GEREKMEZ):** sahte pg sürücüsüyle sorgu metni + parametreler, yıldız `unnest + ON CONFLICT`, telemetry tek multi-INSERT, hata politikası (telemetry hemen düşer / yıldız BİR KEZ dener / 2. hatada düşer), DB yoksa dosyaya düşme (süreç ölmez), kuyruğa eklerken I/O olmaması (tick güvenliği), otomatik flush — **35/35** |
 | `npm run test-bat` | **BAŞLATMA SÖZLEŞMESİ (tarayıcısız, hızlı):** `start.bat` saf ASCII mi (Türkçe/UTF-8 karakter cmd'yi parse aşamasında öldürür), CRLF mi, blok parantezleri dengeli mi, `timeout /t` yerine `ping -n 2` mi — **5/5**; bozuk sürümü yakaladığı kanıtlandı |
 | `npm run test-i18n` | **i18n SÖZLEŞMESİ (tarayıcısız, hızlı):** sunucudaki HER `sys` kodu EN ve TR sözlüğünde var mı + EN/TR anahtar paritesi + kaldırılan `refuel_none` geri gelmesin — **8/8** ("İngilizce oynarken ham Türkçe satır" sınıfını kapatır) |
 | `npm run test-combat` | **M2/M3d uçtan uca:** kaya kırma + ganimet, cooldown, PvP, ölüm/kurtarma, **kalkan regen (saldırıdan sonra gecikmeli kendiliğinden dolum + gövdenin DOLMAMASI)**, tractor — **19/19** |
